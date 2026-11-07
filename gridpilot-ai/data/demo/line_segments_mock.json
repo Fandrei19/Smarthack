@@ -1,0 +1,8 @@
+{
+  "_note": "MOCK / SIMULATED segments for independent development of the ML module. Coordinates are illustrative points in Dobrogea, NOT a real PPC line. Participant 1 owns config/line_segments.json; this file documents the schema Participant 2 expects: latitude/longitude in degrees, azimuth_deg = line direction in degrees clockwise from north (0-360), altitude_m optional.",
+  "segments": [
+    {"segment_id": "SEG_1", "latitude": 44.60, "longitude": 28.40, "azimuth_deg": 40.0, "altitude_m": 60.0},
+    {"segment_id": "SEG_2", "latitude": 44.75, "longitude": 28.65, "azimuth_deg": 95.0, "altitude_m": 120.0},
+    {"segment_id": "SEG_3", "latitude": 44.90, "longitude": 28.90, "azimuth_deg": 150.0, "altitude_m": 90.0}
+  ]
+}

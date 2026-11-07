@@ -1,0 +1,8 @@
+{
+  "_note": "Illustrative segment geometry in Dobrogea for a simulated line. Coordinates and azimuths do not describe PPC assets. Azimuth is measured clockwise from north.",
+  "segments": [
+    {"segment_id": "SEG_1", "latitude": 44.38, "longitude": 28.14, "azimuth_deg": 72.0},
+    {"segment_id": "SEG_2", "latitude": 44.46, "longitude": 28.48, "azimuth_deg": 71.0},
+    {"segment_id": "SEG_3", "latitude": 44.55, "longitude": 28.81, "azimuth_deg": 69.0}
+  ]
+}
