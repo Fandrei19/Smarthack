@@ -1,0 +1,25 @@
+# virtual environments
+venv/
+.venv/
+
+# python cache
+__pycache__/
+*.py[cod]
+
+# model files
+*.pkl
+*.joblib
+
+# data
+data/raw/
+data/processed/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# environment variables
+.env
