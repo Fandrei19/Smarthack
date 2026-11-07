@@ -2,6 +2,7 @@
 
 Source: Open-Meteo Historical Weather API, ERA5 reanalysis (CC BY 4.0).
 https://open-meteo.com/en/docs/historical-weather-api
+Optional NASA POWER historical source: https://power.larc.nasa.gov/docs/services/api/temporal/hourly/
 Demo locations represent synthetic spans, not monitored power lines.
 Requires pandas. From gridpilot-ai, run: python -m src.data_pipeline
 """
@@ -31,6 +32,8 @@ FIELDS = {
     "wind_direction_10m": ("wind_from_deg", "°"),
     "shortwave_radiation": ("solar_ghi_wm2", "W/m²"),
 }
+FORECAST_FIELDS = {**FIELDS, "relative_humidity_2m": ("relative_humidity_pct", "%")}
+WEATHER_COLUMNS = [name for name, _ in FIELDS.values()]
 LAGS_H = (1, 3, 6)
 
 
@@ -48,7 +51,7 @@ def get_json(url):
         time.sleep(2 ** attempt)
 
 
-def read_points(path):
+def read_points(path, *, include_azimuth=False):
     with path.open(encoding="utf-8") as handle:
         segments = json.load(handle)["segments"]
     if not isinstance(segments, list) or not segments:
@@ -61,21 +64,22 @@ def read_points(path):
             raise ValueError("Segment IDs must be nonempty and unique")
         if not (-90 <= lat <= 90 and -180 <= lon <= 180 and 0 <= azimuth < 360):
             raise ValueError(f"{segment_id}: invalid geometry")
-        points[segment_id] = (lat, lon)
+        points[segment_id] = (lat, lon, azimuth) if include_azimuth else (lat, lon)
     return points
 
 
 def fetch_hourly(endpoint, latitude, longitude, grid, **options):
+    fields = FORECAST_FIELDS if endpoint == FORECAST else FIELDS
     query = urlencode({
         "latitude": latitude,
         "longitude": longitude,
-        "hourly": ",".join(FIELDS),
+        "hourly": ",".join(fields),
         "wind_speed_unit": "ms",
         "timezone": "GMT",
         **options,
     })
     payload = get_json(f"{endpoint}?{query}")
-    for field, (_, unit) in FIELDS.items():
+    for field, (_, unit) in fields.items():
         actual = payload["hourly_units"].get(field)
         if actual != unit:
             raise ValueError(f"Unexpected unit for {field}: {actual!r}; expected {unit!r}")
@@ -90,7 +94,7 @@ def fetch_hourly(endpoint, latitude, longitude, grid, **options):
         raise ValueError("Open-Meteo response contains non-hourly timestamps")
     weather = pd.DataFrame({
         name: pd.to_numeric(hourly[field], errors="coerce")
-        for field, (name, _) in FIELDS.items()
+        for field, (name, _) in fields.items()
     }, index=index)
     weather = weather.reindex(grid).replace([np.inf, -np.inf], np.nan)
     weather.index.name = "timestamp_utc"
@@ -100,14 +104,69 @@ def fetch_hourly(endpoint, latitude, longitude, grid, **options):
         weather["wind_from_deg"].between(0, 360)
     ) % 360
     weather["solar_ghi_wm2"] = weather["solar_ghi_wm2"].where(weather["solar_ghi_wm2"].between(0, 1500))
+    if "relative_humidity_pct" in weather:
+        humidity = weather["relative_humidity_pct"]
+        weather["relative_humidity_pct"] = humidity.where(humidity.between(0, 100))
     return weather, payload["latitude"], payload["longitude"]
+
+def parse_nasa_weather(payload):
+    header = payload["header"]
+    if header["time_standard"] != "UTC":
+        raise ValueError("NASA POWER timestamps must be in UTC")
+
+    parameters = payload["properties"]["parameter"]
+    columns = {
+        "T2M": "air_temp_c",
+        "WS10M": "wind_speed_ms",
+        "WD10M": "wind_from_deg",
+        "ALLSKY_SFC_SW_DWN": "solar_ghi_wm2",
+    }
+    units = {"T2M": "C", "WS10M": "m/s", "WD10M": "Degrees", "ALLSKY_SFC_SW_DWN": "Wh/m^2"}
+    for key, expected in units.items():
+        actual = payload["parameters"][key]["units"]
+        if actual != expected:
+            raise ValueError(f"Unexpected NASA POWER unit for {key}: {actual!r}; expected {expected!r}")
+
+    # Wh/m² per one-hour interval has the same numeric value as average W/m².
+    weather = pd.DataFrame({
+        name: pd.Series(parameters[key])
+        for key, name in columns.items()
+    })
+    weather = weather.apply(pd.to_numeric, errors="coerce")
+    weather = weather.replace(header["fill_value"], float("nan"))
+    weather.index = pd.to_datetime(weather.index, format="%Y%m%d%H", utc=True)
+    weather.index.name = "timestamp_utc"
+    return weather.replace([np.inf, -np.inf], np.nan).sort_index()
+
+def fetch_nasa_hourly(latitude, longitude, start_date, end_date):
+    query = urlencode({
+        "parameters": "T2M,WS10M,WD10M,ALLSKY_SFC_SW_DWN",
+        "community": "RE",
+        "latitude": latitude,
+        "longitude": longitude,
+        "start": start_date,
+        "end": end_date,
+        "format": "JSON",
+        "time-standard": "UTC",
+    })
+    endpoint = "https://power.larc.nasa.gov/api/temporal/hourly/point"
+    return parse_nasa_weather(get_json(f"{endpoint}?{query}"))
+
+def add_wind_features(weather, azimuth_deg):
+    """Compute the acute angle to the line axis and perpendicular wind speed."""
+    angle = ((weather["wind_from_deg"] - azimuth_deg + 90) % 180 - 90).abs()
+    return weather.assign(
+        wind_angle_deg=angle,
+        crosswind_speed_ms=weather["wind_speed_ms"] * np.sin(np.deg2rad(angle)),
+    )
 
 
 def model_weather_rows(weather, segment_id, source):
-    rows = weather.rename(columns=ML_COLUMN_NAMES).reset_index()
+    core = weather[WEATHER_COLUMNS]
+    rows = core.rename(columns=ML_COLUMN_NAMES).reset_index()
     rows.insert(1, "segment_id", segment_id)
     rows["source"] = source
-    rows["data_quality"] = np.where(weather.notna().all(axis=1), "ok", "missing")
+    rows["data_quality"] = np.where(core.notna().all(axis=1), "ok", "missing")
     return rows
 
 
@@ -134,7 +193,7 @@ def training_rows(weather, span_id, location, source_location, train_end, valida
     features["hour_utc"] = features.index.hour
     features["month_utc"] = features.index.month
 
-    targets = weather.shift(-1).add_prefix("target_").add_suffix("_1h")
+    targets = weather[WEATHER_COLUMNS].shift(-1).add_prefix("target_").add_suffix("_1h")
     rows = features.join(targets)
     rows.insert(0, "target_timestamp_utc", rows.index + pd.Timedelta(hours=1))
     rows.insert(0, "span_id", span_id)
@@ -155,6 +214,8 @@ def parse_args():
     parser.add_argument("--segments", type=Path, default=ROOT / "config" / "line_segments.json")
     parser.add_argument("--start", default="2022-01-01", help="First included day (UTC)")
     parser.add_argument("--end", default="2025-12-31", help="Last included day (UTC)")
+    parser.add_argument("--historical-source", choices=("era5", "nasa"), default="era5",
+                        help="Historical provider (default: era5)")
     parser.add_argument("--train-end", default="2024-01-01", help="First validation day (UTC)")
     parser.add_argument("--validation-end", default="2025-01-01", help="First test day (UTC)")
     parser.add_argument("--forecast-hours", type=int, help="Fetch live forecast for the next N full hours")
@@ -167,7 +228,10 @@ def parse_args():
 def main():
     args = parse_args()
     try:
-        points = read_points(args.segments)
+        points = read_points(args.segments, include_azimuth=True)
+        use_nasa = args.historical_source == "nasa"
+        if use_nasa and (args.forecast_hours is not None or args.dataset_output):
+            raise ValueError("--historical-source nasa supports historical weather CSV export only")
         if args.forecast_hours is not None:
             if not 1 <= args.forecast_hours <= 168 or args.dataset_output:
                 raise ValueError("Use 1–168 forecast hours without --dataset-output")
@@ -183,6 +247,8 @@ def main():
             grid = pd.date_range(start, end + pd.Timedelta(hours=23), freq="h")
             options = dict(start_date=args.start, end_date=args.end, models="era5")
             endpoint, source, filename = ARCHIVE, "ERA5", "weather.csv"
+            if use_nasa:
+                source, filename = "NASA_POWER", "weather_nasa.csv"
             if args.dataset_output:
                 train_end, validation_end = (
                     pd.Timestamp(d, tz="UTC") for d in (args.train_end, args.validation_end)
@@ -195,12 +261,22 @@ def main():
             raise ValueError("Weather and dataset output paths must differ")
 
         weather_batches, feature_batches = [], []
-        for segment_id, location in points.items():
-            weather, grid_lat, grid_lon = fetch_hourly(endpoint, *location, grid, **options)
+        for segment_id, (lat, lon, azimuth) in points.items():
+            location = (lat, lon)
+            if use_nasa:
+                weather = fetch_nasa_hourly(*location, start.strftime("%Y%m%d"), end.strftime("%Y%m%d"))
+                if weather.index.intersection(grid).empty:
+                    raise ValueError(f"{segment_id}: NASA POWER returned no hours in the requested window")
+                weather = weather.reindex(grid).rename_axis("timestamp_utc")
+                location_info = f"requested coordinates: {location[0]}, {location[1]}"
+            else:
+                weather, grid_lat, grid_lon = fetch_hourly(endpoint, *location, grid, **options)
+                location_info = f"source grid: {grid_lat}, {grid_lon}"
+            weather = add_wind_features(weather, azimuth)
             rows = model_weather_rows(weather, segment_id, source)
             weather_batches.append(rows)
             print(f"{segment_id}: {(rows['data_quality'] == 'ok').sum():,}/{len(rows):,} valid hours "
-                  f"(source grid: {grid_lat}, {grid_lon})", flush=True)
+                  f"({location_info})", flush=True)
             if args.dataset_output:
                 features = training_rows(weather, segment_id, location, (grid_lat, grid_lon),
                                          train_end, validation_end)
