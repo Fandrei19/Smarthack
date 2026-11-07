@@ -292,13 +292,28 @@ def rolling_origin_backtest(dataset: pd.DataFrame, cfg: TrainConfig,
 def train_pipeline(weather: pd.DataFrame, segments: Sequence[Mapping[str, Any]],
                    conductor_config: Mapping[str, Any], cfg: TrainConfig = TrainConfig(),
                    ampacity_fn: pe.AmpacityFn = pe.calculate_ampacity,
-                   dataset_path: str | Path | None = None, failures_path: str | Path | None = None
+                   dataset_path: str | Path | None = None, failures_path: str | Path | None = None,
+                   prebuilt_dataset: pd.DataFrame | None = None
                    ) -> tuple[dict[str, Any], pd.DataFrame, dict[str, Any]]:
     """Dataset -> chronological split -> fit -> evaluate -> deployable bundle.
 
     Returns (bundle, dataset, report). The bundle holds only the deployed quantile models.
     """
-    ds = build_training_dataset(weather, segments, conductor_config, ampacity_fn, dataset_path, failures_path)
+    if prebuilt_dataset is not None:
+        ds = prebuilt_dataset.copy()
+        required = set(FEATURE_COLUMNS + [
+            "timestamp_utc", "segment_id", "target_ampacity_a"
+        ])
+        missing = required - set(ds.columns)
+        if missing:
+            raise ValueError(f"Dataset preconstruit incomplet. Lipsesc: {sorted(missing)}")
+        if ds.empty:
+            raise ValueError("Datasetul preconstruit este gol.")
+    else:
+        ds = build_training_dataset(
+            weather, segments, conductor_config,
+            ampacity_fn, dataset_path, failures_path
+        )
     geo = _geo_map(segments)
     static = {sid: pe.compute_static_rating(g, conductor_config, ampacity_fn) for sid, g in geo.items()
               if sid in set(ds["segment_id"])}
