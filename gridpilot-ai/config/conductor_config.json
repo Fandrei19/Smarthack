@@ -1,0 +1,48 @@
+{
+  "_meta": {
+    "owner": "Participant 2 (physics_engine)",
+    "status": "DEMONSTRATIVE / SIMULATED. Not a PPC / Transelectrica asset. No real grid measurements.",
+    "conductor_source": "Conductor, span and weather parameters of CIGRE TB 601 'Example B' exactly as reproduced in the official LineRate example https://statnett.github.io/linerate/auto_examples/plot_cigre.html (the docs describe the example as taken from CIGRE TB 601, Example B). The docs do NOT name the conductor type, so we do not name it either. Roughly a 28.1 mm ACSR-class conductor.",
+    "units_source": "Units from https://statnett.github.io/linerate/api/types.html (diameters m, temperatures degC, resistance ohm/m, albedo/emissivity dimensionless).",
+    "not_in_linerate_docs": "Everything under 'operating', 'span' and 'static_rating' is OUR simulation assumption (not from LineRate/CIGRE). Team must confirm. Each value is annotated below."
+  },
+  "conductor": {
+    "core_diameter": 0.0104,
+    "conductor_diameter": 0.0281,
+    "outer_layer_strand_diameter": 0.0022,
+    "emissivity": 0.9,
+    "solar_absorptivity": 0.9,
+    "temperature1": 25.0,
+    "temperature2": 75.0,
+    "resistance_at_temperature1": 7.283e-5,
+    "resistance_at_temperature2": 8.688e-5,
+    "aluminium_cross_section_area": null,
+    "constant_magnetic_effect": 1,
+    "current_density_proportional_magnetic_effect": 0,
+    "max_magnetic_core_relative_resistance_increase": 1,
+    "_notes": "aluminium_cross_section_area=null is converted to NaN in code, exactly as float('nan') in the official example ('No core magnetisation loss'). Units: m, m, m, -, -, degC, degC, ohm/m, ohm/m, m^2, -, m^2/A, -."
+  },
+  "span": {
+    "num_conductors": 1,
+    "length_m": 400.0,
+    "default_altitude_m": 100.0,
+    "_notes": "SIMULATED. LineRate derives the conductor azimuth from tower coordinates, so each segment is represented by two towers placed +-length_m/2 along its azimuth around the segment midpoint (flat-earth offset, zero inclination). length_m does not affect the CIGRE ampacity except through azimuth/inclination. default_altitude_m is used only if the segment config has no altitude_m. num_conductors=1 (simplex) as in the official example."
+  },
+  "operating": {
+    "max_conductor_temperature_c": 75.0,
+    "ground_albedo": 0.2,
+    "clearness_ratio_max": 1.0,
+    "ampacity_search_min_a": 0.0,
+    "ampacity_search_max_a": 8000.0,
+    "ampacity_tolerance_a": 0.5,
+    "_notes": "max_conductor_temperature_c=75 is our ASSUMPTION; chosen equal to the upper resistance reference temperature (temperature2) so that no resistance extrapolation beyond the datasheet-style points is needed. ground_albedo=0.2 is the 'soil, grass and crops' value from the LineRate solar_heating docstring (Dobrogea is mostly farmland) - the official example uses 0.15. clearness_ratio_max=1.0 caps the GHI-derived clearness ratio (our assumption, see physics_engine.estimate_clearness_ratio). search bounds/tolerance are LineRate defaults except tolerance (default 1.0 A)."
+  },
+  "static_rating": {
+    "air_temp_c": 35.0,
+    "wind_speed_ms": 0.61,
+    "wind_angle_of_attack_deg": 90.0,
+    "clearness_ratio": 1.0,
+    "timestamp_utc": "2025-06-21T12:00:00Z",
+    "_notes": "PROPOSED by Participant 2, NOT an official or PPC/Transelectrica static-rating convention - the team must confirm or replace. 0.61 m/s (~2 ft/s) is a commonly used conservative static-rating wind speed convention; 35 degC and solstice-noon full-clearness are conservative-summer placeholders. Computed with the same CIGRE601 physics as the dynamic labels, per segment, so static vs dynamic differ only by weather."
+  }
+}
