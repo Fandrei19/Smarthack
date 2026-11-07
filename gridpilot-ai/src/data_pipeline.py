@@ -30,6 +30,8 @@ FIELDS = {
     "wind_speed_10m": ("wind_speed_ms", "m/s"),
     "wind_direction_10m": ("wind_from_deg", "°"),
     "shortwave_radiation": ("solar_ghi_wm2", "W/m²"),
+    "direct_normal_irradiance": ("solar_direct_normal_wm2", "W/m²"),
+    "diffuse_radiation": ("solar_diffuse_wm2", "W/m²"),
 }
 LAGS_H = (1, 3, 6)
 
