@@ -1,0 +1,21 @@
+# virtual environments
+venv/
+.venv/
+
+# python cache
+__pycache__/
+*.py[cod]
+
+# model files
+*.pkl
+*.joblib
+
+# data
+data/raw/
+data/processed/
+
+# IDE
+.vscode/
+
+# OS
+.DS_Store
