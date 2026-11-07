@@ -23,3 +23,17 @@ def filter_window(df, hours=24):
     return df[df["timestamp"] >= start]
 
 
+def line_rating_by_time(df):
+    """per timestamp: line rating = min ampacity across segments, plus the limiting segment.
+    If any segment is missing a prediction at that timestamp, the rating is NaN."""
+    rows = []
+    for ts, g in df.groupby("timestamp"):
+        amp = g.set_index("segment_id")["predicted_ampacity"]
+        known = not amp.isna().any()
+        rows.append({
+            "timestamp": ts,
+            "line_rating": amp.min() if known else float("nan"),
+            "limiting_segment": amp.idxmin() if known else None,
+            "static_rating": g["static_rating"].min(),
+        })
+    return pd.DataFrame(rows)

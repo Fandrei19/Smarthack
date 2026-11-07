@@ -16,6 +16,11 @@ overview = st.Page(
     default = True
 )
 
+maps = st.Page(
+    "pages/map.py",
+    title = "Map",
+)
+
 monitoring = st.Page(
     "pages/line_monitoring.py",
     title = "Line Monitoring",
@@ -56,7 +61,7 @@ st.sidebar.success("Monitoring active")
 
 # navigation
 pages = {
-    "MONITORING": [overview, monitoring],
+    "MONITORING": [overview, monitoring, maps],
     "ACTIONS": [agent, alerts],
     "ANALYTICS": [reports],
     "CONFIGURATION": [settings]
