@@ -17,9 +17,31 @@ def latest_snapshot(df):
     """Latest available hour, one row per segment."""
     return df[df["timestamp"] == df["timestamp"].max()].set_index("segment_id")
 
-# filters the dataset to a specific time window
-def filter_window(df, hours=24):
-    start = df["timestamp"].max() - pd.Timedelta(hours=hours)
-    return df[df["timestamp"] >= start]
+def filter_forecast_window(df, hours=24):
+    """Select the first N hours of the available forecast."""
+    start = df["timestamp"].min()
+    return df[df["timestamp"] < start + pd.Timedelta(hours=hours)]
 
 
+def decision_for_hour(decisions, hour):
+    """Select the line decision corresponding to the displayed UTC hour."""
+    return next(
+        (row for row in decisions if pd.to_datetime(row["timestamp_utc"], utc=True) == hour),
+        {},
+    )
+
+
+def line_rating_by_time(df):
+    """per timestamp: line rating = min ampacity across segments, plus the limiting segment.
+    If any segment is missing a prediction at that timestamp, the rating is NaN."""
+    rows = []
+    for ts, g in df.groupby("timestamp"):
+        amp = g.set_index("segment_id")["predicted_ampacity"]
+        known = not amp.isna().any()
+        rows.append({
+            "timestamp": ts,
+            "line_rating": amp.min() if known else float("nan"),
+            "limiting_segment": amp.idxmin() if known else None,
+            "static_rating": g["static_rating"].min(),
+        })
+    return pd.DataFrame(rows)
