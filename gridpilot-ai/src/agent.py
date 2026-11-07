@@ -1,3 +1,4 @@
+import argparse
 import json
 from pathlib import Path
 from typing import Any
@@ -15,9 +16,6 @@ DECISION_LOG: list[dict[str, Any]] = []
 
 
 def validate_agent_input(predictions: pd.DataFrame) -> dict:
-    """
-    Validate prediction data structure and values.
-    """
     return validate_predictions(predictions)
 
 
@@ -25,9 +23,6 @@ def monitor_agent_predictions(
     predictions: pd.DataFrame,
     expected_segments: list[str] | None = None
 ) -> dict:
-    """
-    Validate predictions and perform multi-point line monitoring.
-    """
     segments = expected_segments or EXPECTED_SEGMENTS
     validation_result = validate_agent_input(predictions)
 
@@ -66,9 +61,6 @@ def calculate_line_static_ratings(
     monitoring_results: pd.DataFrame,
     expected_segments: list[str] | None = None
 ) -> pd.DataFrame:
-    """
-    Calculate the conservative line-level static rating for each valid timestamp.
-    """
     segments = expected_segments or EXPECTED_SEGMENTS
     required_columns = [
         "timestamp_utc",
@@ -136,9 +128,6 @@ def generate_agent_decisions(
     planned_load_a: float | dict[str, float] | None = None,
     is_stale: bool = False
 ) -> pd.DataFrame:
-    """
-    Generate a risk-based decision for every monitored timestamp.
-    """
     decisions = []
 
     for _, monitoring_row in monitoring_results.iterrows():
@@ -211,6 +200,101 @@ def generate_agent_decisions(
     return pd.DataFrame(decisions)
 
 
+def load_expected_segments_from_config(config: dict[str, Any] | str | Path | None) -> list[str]:
+    if config is None:
+        return EXPECTED_SEGMENTS
+
+    if isinstance(config, (str, Path)):
+        cfg_path = Path(config)
+        if not cfg_path.exists():
+            return EXPECTED_SEGMENTS
+        raw = json.loads(cfg_path.read_text(encoding="utf-8"))
+    elif isinstance(config, dict):
+        raw = config
+    else:
+        return EXPECTED_SEGMENTS
+
+    if isinstance(raw, list):
+        return [
+            str(item["segment_id"] if isinstance(item, dict) else item)
+            for item in raw
+        ]
+
+    segments = raw.get("expected_segments") or raw.get("segments") or raw.get("line_segments")
+    if not segments:
+        return EXPECTED_SEGMENTS
+
+    return [
+        str(item["segment_id"] if isinstance(item, dict) else item)
+        for item in segments
+    ]
+
+
+def summarize_agent_results(agent_results: list[dict[str, Any]]) -> dict[str, Any]:
+    total_hours = len(agent_results)
+    if total_hours == 0:
+        return {
+            "total_hours": 0,
+            "action_counts": {},
+            "risk_counts": {},
+            "human_review_hours": 0,
+            "bottleneck_counts": {},
+            "min_line_rating_q05_a": None,
+            "max_line_rating_q05_a": None,
+        }
+
+    df = pd.DataFrame(agent_results)
+    valid_ratings = df["line_rating_q05_a"].dropna()
+
+    return {
+        "total_hours": total_hours,
+        "action_counts": df["action"].value_counts().to_dict(),
+        "risk_counts": df["risk_level"].value_counts().to_dict(),
+        "human_review_hours": int(df["requires_human_review"].sum()),
+        "bottleneck_counts": df["bottleneck_segment"].dropna().value_counts().to_dict(),
+        "min_line_rating_q05_a": float(valid_ratings.min()) if not valid_ratings.empty else None,
+        "max_line_rating_q05_a": float(valid_ratings.max()) if not valid_ratings.empty else None,
+    }
+
+
+def load_predictions_or_infer(
+    predictions: pd.DataFrame | str | Path,
+    config: dict[str, Any]
+) -> pd.DataFrame:
+    if isinstance(predictions, (str, Path)):
+        pred_path = Path(predictions)
+        if not pred_path.exists():
+            raise FileNotFoundError(f"Input file not found: {pred_path}")
+        df = pd.read_csv(pred_path)
+    elif isinstance(predictions, pd.DataFrame):
+        df = predictions.copy()
+    else:
+        raise ValueError("predictions must be a DataFrame or file path.")
+
+    if "q05_ampacity_a" in df.columns:
+        return df
+
+    import joblib
+    from src import ml_model as mm
+
+    model_path = Path(config.get("model_path", "models/ampacity_model.joblib"))
+    if not model_path.exists():
+        raise FileNotFoundError(
+            f"Input lacks 'q05_ampacity_a' and model bundle was not found at {model_path}."
+        )
+
+    bundle = joblib.load(model_path)
+    inferred_df = mm.predict_ampacity(df, bundle=bundle)
+
+    save_predictions_path = config.get("save_predictions_path")
+    if save_predictions_path:
+        out_pred = Path(save_predictions_path)
+        out_pred.parent.mkdir(parents=True, exist_ok=True)
+        inferred_df.to_csv(out_pred, index=False)
+
+    return inferred_df
+
+
 def run_agent(
     predictions: pd.DataFrame | str | Path = "data/processed/predictions.csv",
     config: dict[str, Any] | str | Path | None = "config/line_segments.json"
@@ -231,15 +315,7 @@ def run_agent(
     output_path = cfg.get("output_path", "data/processed/agent_results.json")
     log_path = cfg.get("log_path", None)
 
-    if isinstance(predictions, (str, Path)):
-        pred_path = Path(predictions)
-        if not pred_path.exists():
-            raise FileNotFoundError(f"Predictions file not found: {pred_path}")
-        df = pd.read_csv(pred_path)
-    elif isinstance(predictions, pd.DataFrame):
-        df = predictions.copy()
-    else:
-        raise ValueError("predictions must be a DataFrame or file path.")
+    df = load_predictions_or_infer(predictions=predictions, config=cfg)
 
     monitoring_df = calculate_line_rating(
         predictions=df,
@@ -298,19 +374,22 @@ def run_agent(
     return agent_results
 
 
-def main():
-    import argparse
-
+def main() -> None:
     parser = argparse.ArgumentParser(description="Run GridPilot AI Decision Agent")
     parser.add_argument(
         "--predictions",
         default="data/processed/predictions.csv",
-        help="Path to predictions.csv"
+        help="Path to predictions.csv or weather.csv"
     )
     parser.add_argument(
         "--config",
         default="config/line_segments.json",
         help="Path to line_segments.json"
+    )
+    parser.add_argument(
+        "--model",
+        default="models/ampacity_model.joblib",
+        help="Path to trained joblib model bundle"
     )
     parser.add_argument(
         "--output",
@@ -319,69 +398,16 @@ def main():
     )
     args = parser.parse_args()
 
-    cfg_dict = {"output_path": args.output}
-    cfg_dict["expected_segments"] = load_expected_segments_from_config(args.config)
+    cfg_dict = {
+        "output_path": args.output,
+        "model_path": args.model,
+        "expected_segments": load_expected_segments_from_config(args.config),
+    }
 
     results = run_agent(predictions=args.predictions, config=cfg_dict)
     summary = summarize_agent_results(results)
     print(f"Processed {summary['total_hours']} hours -> {args.output}")
     print(f"Actions: {summary['action_counts']}")
-
-def load_expected_segments_from_config(config: dict[str, Any] | str | Path | None) -> list[str]:
-    if config is None:
-        return EXPECTED_SEGMENTS
-
-    if isinstance(config, (str, Path)):
-        cfg_path = Path(config)
-        if not cfg_path.exists():
-            return EXPECTED_SEGMENTS
-        raw = json.loads(cfg_path.read_text(encoding="utf-8"))
-    elif isinstance(config, dict):
-        raw = config
-    else:
-        return EXPECTED_SEGMENTS
-
-    if isinstance(raw, list):
-        return [
-            str(item["segment_id"] if isinstance(item, dict) else item)
-            for item in raw
-        ]
-
-    segments = raw.get("expected_segments") or raw.get("segments") or raw.get("line_segments")
-    if not segments:
-        return EXPECTED_SEGMENTS
-
-    return [
-        str(item["segment_id"] if isinstance(item, dict) else item)
-        for item in segments
-    ]
-
-
-def summarize_agent_results(agent_results: list[dict[str, Any]]) -> dict[str, Any]:
-    total_hours = len(agent_results)
-    if total_hours == 0:
-        return {
-            "total_hours": 0,
-            "action_counts": {},
-            "risk_counts": {},
-            "human_review_hours": 0,
-            "bottleneck_counts": {},
-            "min_line_rating_q05_a": None,
-            "max_line_rating_q05_a": None,
-        }
-
-    df = pd.DataFrame(agent_results)
-    valid_ratings = df["line_rating_q05_a"].dropna()
-
-    return {
-        "total_hours": total_hours,
-        "action_counts": df["action"].value_counts().to_dict(),
-        "risk_counts": df["risk_level"].value_counts().to_dict(),
-        "human_review_hours": int(df["requires_human_review"].sum()),
-        "bottleneck_counts": df["bottleneck_segment"].dropna().value_counts().to_dict(),
-        "min_line_rating_q05_a": float(valid_ratings.min()) if not valid_ratings.empty else None,
-        "max_line_rating_q05_a": float(valid_ratings.max()) if not valid_ratings.empty else None,
-    }
 
 
 if __name__ == "__main__":
