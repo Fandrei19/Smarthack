@@ -4,7 +4,7 @@
 
 Prototip realizat pentru **24h to Power PPC – AI in energy, from data to action**. Beneficiarul operațional vizat este Rețele Electrice. Un producător precum PPC Renewables ar putea valorifica energia suplimentară dacă limita termică a liniei este constrângerea care îi reduce livrarea.
 
-> **Starea livrării.** În `main` sunt integrate pipeline-ul meteo, modelul salvat, validarea predicțiilor, monitorizarea segmentelor și motorul de decizie. Secțiunea „Demo offline” le leagă într-o rulare reproductibilă. Dashboardul Streamlit, orchestrarea prin `src/agent.py` și exportul automat din `src/report_generator.py` sunt descrise ca flux țintă. În versiunea verificată, aceste trei puncte de intrare sunt încă fișiere goale.
+> **Starea livrării.** Pipeline-ul meteo, modelul salvat și agentul rulează împreună în demo-ul offline. Dashboardul Streamlit și exportul automat din `src/report_generator.py` rămân etape de integrare.
 
 ## De la vreme la acțiune
 
@@ -22,7 +22,7 @@ flowchart LR
 | --- | --- | --- |
 | **Perceive** | Colectează seriile pe cele trei segmente, aliniază orele în UTC, verifică unitățile și marchează lipsurile. | [Pipeline meteo](src/data_pipeline.py) |
 | **Estimate** | Modelul local estimează cuantilele de ampacitate pe segment. LineRate furnizează referința fizică pentru antrenare. | [Model ML](src/ml_model.py) · [Motor fizic](src/physics_engine.py) |
-| **Decide** | Validează predicțiile, găsește minimul q05 la fiecare oră și clasifică riscul față de limita statică. | [Validator](src/data_validator.py) · [Monitor](src/multi_point_monitor.py) · [Motor de decizie](src/decision_engine.py) |
+| **Decide** | Validează predicțiile, găsește minimul q05 la fiecare oră și clasifică riscul față de limita statică. | [Validare și monitorizare](src/multi_point_monitor.py) · [Motor de decizie](src/decision_engine.py) |
 | **Act** | Produce o recomandare, motivul ei și un indicator de revizuire umană. Interfața și raportul sunt destinațiile prevăzute pentru aceste rezultate. | [Motor de decizie](src/decision_engine.py) |
 
 ## Echipa și punctele de integrare
@@ -31,7 +31,7 @@ flowchart LR
 | --- | --- | --- |
 | **1 · Data Engineer** | Surse publice, configurația celor trei puncte, normalizare, verificarea datelor și demo fără API. | `weather.csv`, export NASA, prognoză și `weather_mock.csv` |
 | **2 · ML Engineer** | Etichete de referință CIGRE, modele de comparație, regresie pe cuantile, calibrare și analiză pe test separat. | Modelul local, raportul de evaluare și `predictions.csv` |
-| **3 · Agent Developer** | Validarea predicțiilor, identificarea segmentului limitativ, clasificarea riscului și recomandări. | Rezultatele orare de monitorizare și decizie. `agent_results.json` este contractul de integrare planificat. |
+| **3 · Agent Developer** | Validarea predicțiilor, identificarea segmentului limitativ, clasificarea riscului și recomandări. | Rezultatele orare de monitorizare și decizie. `agent_results.json` conține deciziile orare pe care le poate prelua interfața. |
 | **4 · Frontend, Reports & Integration** | Dashboard Streamlit, integrarea datelor și deciziilor, raportare și pregătirea demo-ului. | Interfața și raportul pentru operator, plus reproducerea fluxului pentru juriu. |
 
 ## Pornire rapidă
@@ -53,60 +53,13 @@ După instalarea dependențelor, demo-ul rulează fără acces la internet. Fiș
 python -m src.ml_model predict --weather data/demo/weather_mock.csv --out data/processed/predictions_demo.csv
 ```
 
-Pentru etapa de decizie, rulați blocul următor în **Git Bash** sau într-un shell compatibil Bash, din același director. Blocul conectează funcțiile deja disponibile și salvează rezultatele în `data/processed/agent_results_demo.json`.
+Rulați agentul din același director pentru a genera deciziile orare.
 
 ```bash
-python - <<'PY'
-import json
-from pathlib import Path
-
-import pandas as pd
-
-from src.data_validator import validate_predictions
-from src.decision_engine import evaluate_line_decision
-from src.multi_point_monitor import monitor_line
-
-config = json.loads(Path("config/line_segments.json").read_text(encoding="utf-8"))
-segments = [segment["segment_id"] for segment in config["segments"]]
-predictions = pd.read_csv("data/processed/predictions_demo.csv")
-static_a = float(predictions["static_rating_a"].min())
-results = []
-
-for timestamp, hourly in predictions.groupby("timestamp_utc", dropna=False):
-    validation = validate_predictions(hourly)
-    if validation["is_valid"]:
-        line = monitor_line(hourly, segments).iloc[0].to_dict()
-    else:
-        line = {
-            "line_rating_q05_a": None,
-            "bottleneck_segment": None,
-            "monitoring_status": "INCOMPLETE",
-            "missing_segments": sorted(set(segments) - set(hourly["segment_id"])),
-            "reason": " ".join(validation["errors"]),
-        }
-
-    dynamic_a = line["line_rating_q05_a"]
-    dynamic_a = None if pd.isna(dynamic_a) else float(dynamic_a)
-    decision = evaluate_line_decision(dynamic_a, static_a, line["monitoring_status"])
-    results.append({
-        "timestamp_utc": str(timestamp),
-        "static_rating_a": static_a,
-        "line_rating_q05_a": dynamic_a,
-        "bottleneck_segment": line["bottleneck_segment"],
-        "monitoring_status": line["monitoring_status"],
-        "missing_segments": line["missing_segments"],
-        "monitoring_reason": line["reason"],
-        **decision,
-    })
-
-output = Path("data/processed/agent_results_demo.json")
-output.write_text(json.dumps(results, indent=2, allow_nan=False) + "\n", encoding="utf-8")
-print(f"{len(results)} evaluari ale liniei -> {output}")
-print(json.dumps(results[0], indent=2))
-PY
+python -m src.agent --predictions data/processed/predictions_demo.csv --output data/processed/agent_results_demo.json
 ```
 
-La 00:00 UTC, demo-ul a identificat `SEG_3` drept segment limitativ, cu un q05 de aproximativ 1.162 A și risc `LOW`. Pentru scenariul de rezervă, scoateți dintr-o copie a predicțiilor rândul unui segment din prima oră. Acea oră trebuie să producă `UNKNOWN` și `REQUEST_DATA_VALIDATION`. Suita acoperă atât [monitorizarea segmentelor](tests/test_monitor.py), cât și [fallback-ul pentru predicții invalide](tests/test_validation_fallback.py).
+La 00:00 UTC, demo-ul identifică `SEG_3` ca segment limitativ, cu un q05 de aproximativ 1.162 A și acțiunea `RECOMMEND_DYNAMIC_RATING`. Dacă lipsește predicția unui segment, agentul marchează ora ca `UNCERTAIN`, recomandă `FALLBACK_STATIC` și cere revizuire umană. Vezi [testul de fallback](tests/test_validation_fallback.py).
 
 ## Date și contracte
 
@@ -177,12 +130,12 @@ Agentul calculează raportul `R = limita statică / limita dinamică q05`. Limit
 
 | Condiție | Risc | Acțiune recomandată |
 | --- | --- | --- |
-| `R ≤ 0,80` | LOW | `NORMAL_MONITORING` |
-| `0,80 < R ≤ 0,95` | MEDIUM | `INCREASE_MONITORING` |
-| `R > 0,95` | HIGH | `REQUEST_OPERATOR_REVIEW` |
-| Date incomplete sau invalide | UNKNOWN | `REQUEST_DATA_VALIDATION` |
+| `R ≤ 0,80` | LOW | `RECOMMEND_DYNAMIC_RATING` |
+| `0,80 < R ≤ 0,95` | MEDIUM | `KEEP_STATIC` |
+| `R > 0,95` | HIGH | `OPERATOR_REVIEW` |
+| Date incomplete, invalide sau învechite | UNCERTAIN | `FALLBACK_STATIC` |
 
-Validatorul verifică timestampurile, duplicatele, calitatea datelor, ordinea cuantilelor și valorile pozitive și finite. Monitorul verifică prezența segmentelor așteptate. O oră incompletă produce cerere de validare fără calcularea raportului de risc. Pragurile sunt ipoteze pentru prototip, iar recomandările critice cer revizuire umană. Explicația deciziei se poate urmări din **oră → segment limitativ → q05 → prag → acțiune**.
+Validatorul verifică timestampurile, duplicatele, calitatea datelor, ordinea cuantilelor și valorile pozitive și finite. Monitorul verifică prezența segmentelor așteptate. O oră incompletă produce o recomandare de revenire la limita statică și cere revizuire umană. Regulile de incertitudine și de sarcină planificată pot avea prioritate față de pragurile din tabel. Pragurile sunt ipoteze pentru prototip, iar recomandările critice cer revizuire umană. Explicația deciziei se poate urmări din **oră → segment limitativ → q05 → prag → acțiune**.
 
 ## Dashboard și raportare
 
@@ -205,7 +158,7 @@ python -m pip install pytest "linerate==5.0.0"
 python -m pytest -q
 ```
 
-Suita verifică parsarea meteo, calculul vântului transversal, contractul predicțiilor, comportamentul modelului, identificarea segmentului limitativ, pragurile și cazurile de fallback. În versiunea integrată verificată, **70 de teste au trecut**.
+Suita verifică parsarea meteo, calculul vântului transversal, contractul predicțiilor, comportamentul modelului, identificarea segmentului limitativ, pragurile și cazurile de fallback. În versiunea verificată, **81 de teste au trecut**.
 
 ## Structura proiectului
 
@@ -220,10 +173,9 @@ gridpilot-ai/
 │   ├── data_pipeline.py    Colectare și prelucrare meteo
 │   ├── physics_engine.py   Referința fizică LineRate
 │   ├── ml_model.py         Antrenare și inferență locală
-│   ├── data_validator.py   Validarea predicțiilor
-│   ├── multi_point_monitor.py
+│   ├── multi_point_monitor.py  Validarea predicțiilor și monitorizarea segmentelor
 │   ├── decision_engine.py
-│   ├── agent.py            Punct rezervat pentru orchestrare
+│   ├── agent.py            Orchestrare și exportul deciziilor JSON
 │   └── report_generator.py Punct rezervat pentru raportare
 ├── tests/
 └── app.py                  Punct rezervat pentru dashboard

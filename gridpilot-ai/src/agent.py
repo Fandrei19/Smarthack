@@ -298,7 +298,7 @@ def run_agent(
     return agent_results
 
 
-if __name__ == "__main__":
+def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Run GridPilot AI Decision Agent")
@@ -382,3 +382,7 @@ def summarize_agent_results(agent_results: list[dict[str, Any]]) -> dict[str, An
         "min_line_rating_q05_a": float(valid_ratings.min()) if not valid_ratings.empty else None,
         "max_line_rating_q05_a": float(valid_ratings.max()) if not valid_ratings.empty else None,
     }
+
+
+if __name__ == "__main__":
+    main()
