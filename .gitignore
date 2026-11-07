@@ -45,6 +45,7 @@ logs/
 
 # Generated reports and temporary files
 reports/generated/
+/gridpilot-ai/data/processed/weather_forecast.csv
 tmp/
 temp/
 
