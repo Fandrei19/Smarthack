@@ -36,6 +36,8 @@ FIELDS = {
 }
 FORECAST_FIELDS = {**FIELDS, "relative_humidity_2m": ("relative_humidity_pct", "%")}
 WEATHER_COLUMNS = [name for name, _ in FIELDS.values()]
+# Keep the shared CSV schema independent of provider-specific fields.
+EXPORT_WEATHER_COLUMNS = ["air_temp_c", "wind_speed_ms", "wind_from_deg", "solar_ghi_wm2"]
 LAGS_H = (1, 3, 6)
 
 
@@ -164,7 +166,7 @@ def add_wind_features(weather, azimuth_deg):
 
 
 def model_weather_rows(weather, segment_id, source):
-    core = weather[WEATHER_COLUMNS]
+    core = weather[EXPORT_WEATHER_COLUMNS]
     rows = core.rename(columns=ML_COLUMN_NAMES).reset_index()
     rows.insert(1, "segment_id", segment_id)
     rows["source"] = source

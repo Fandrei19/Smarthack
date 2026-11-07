@@ -69,11 +69,13 @@ def test_forecast_requests_humidity_and_aligns_missing_hours(monkeypatch):
                 "temperature_2m": "°C", "wind_speed_10m": "m/s",
                 "wind_direction_10m": "°", "shortwave_radiation": "W/m²",
                 "relative_humidity_2m": "%",
+                "direct_normal_irradiance": "W/m²", "diffuse_radiation": "W/m²",
             },
             "hourly": {
                 "time": ["2025-07-15T00:00"], "temperature_2m": [20.0],
                 "wind_speed_10m": [3.0], "wind_direction_10m": [90],
                 "shortwave_radiation": [0.0], "relative_humidity_2m": [82],
+                "direct_normal_irradiance": [0.0], "diffuse_radiation": [0.0],
             },
         }
 
@@ -82,3 +84,9 @@ def test_forecast_requests_humidity_and_aligns_missing_hours(monkeypatch):
     weather, _, _ = pipeline.fetch_hourly(pipeline.FORECAST, 44.38, 28.14, grid)
     assert weather["relative_humidity_pct"].iloc[0] == 82
     assert weather.iloc[1].isna().all()
+    rows = pipeline.model_weather_rows(weather, "SEG_1", "OPEN_METEO_FORECAST")
+    assert list(rows.columns) == [
+        "timestamp_utc", "segment_id", "air_temp_c", "wind_speed_ms",
+        "wind_direction_deg", "solar_radiation", "source", "data_quality",
+    ]
+    assert rows["data_quality"].tolist() == ["ok", "missing"]
