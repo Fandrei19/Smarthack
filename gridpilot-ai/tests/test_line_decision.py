@@ -12,7 +12,7 @@ def test_low_risk_decision():
     )
 
     assert result["risk_level"] == "LOW"
-    assert result["action"] == "NORMAL_MONITORING"
+    assert result["action"] == "RECOMMEND_DYNAMIC_RATING"
     assert result["requires_human_review"] is False
 
 
@@ -24,7 +24,7 @@ def test_medium_risk_decision():
     )
 
     assert result["risk_level"] == "MEDIUM"
-    assert result["action"] == "INCREASE_MONITORING"
+    assert result["action"] == "KEEP_STATIC"
 
 
 def test_high_risk_decision():
@@ -35,7 +35,7 @@ def test_high_risk_decision():
     )
 
     assert result["risk_level"] == "HIGH"
-    assert result["action"] == "REQUEST_OPERATOR_REVIEW"
+    assert result["action"] == "OPERATOR_REVIEW"
     assert result["requires_human_review"] is True
 
 
@@ -46,9 +46,9 @@ def test_incomplete_monitoring():
         monitoring_status="INCOMPLETE"
     )
 
-    assert result["risk_level"] == "UNKNOWN"
+    assert result["risk_level"] == "UNCERTAIN"
     assert result["utilization"] is None
-    assert result["action"] == "REQUEST_DATA_VALIDATION"
+    assert result["action"] == "FALLBACK_STATIC"
     assert result["requires_human_review"] is True
 
 

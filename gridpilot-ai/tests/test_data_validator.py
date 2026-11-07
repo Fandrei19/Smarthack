@@ -1,7 +1,7 @@
 
 import pandas as pd
 
-from src.data_validator import validate_predictions
+from src.multi_point_monitor import validate_predictions
 
 
 def test_valid_predictions():

@@ -1,6 +1,6 @@
 import pandas as pd
 
-from src.data_validator import validate_predictions
+from src.multi_point_monitor import validate_predictions
 from src.decision_engine import evaluate_line_decision
 
 
@@ -32,7 +32,7 @@ def test_invalid_predictions_trigger_fallback():
         monitoring_status="INCOMPLETE"
     )
 
-    assert decision["risk_level"] == "UNKNOWN"
+    assert decision["risk_level"] == "UNCERTAIN"
     assert decision["utilization"] is None
-    assert decision["action"] == "REQUEST_DATA_VALIDATION"
+    assert decision["action"] == "FALLBACK_STATIC"
     assert decision["requires_human_review"] is True
