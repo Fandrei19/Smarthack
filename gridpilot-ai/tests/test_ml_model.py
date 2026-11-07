@@ -283,3 +283,90 @@ def test_linerate_span_azimuth_matches_segment(lr):
 def test_linerate_static_rating_is_positive_for_all_mock_segments(lr):
     for s in SEGMENTS:
         assert pe.compute_static_rating(s, COND) > 0
+
+
+# ------------------------------------------------------------- weights / regimes / CI (new)
+def test_severity_weights_are_feature_based_and_severe_overrides_moderate():
+    cfg = mm.TrainConfig()
+    df = pd.DataFrame({"air_temp_c": [20, 29, 31, 31, 29], "wind_speed_ms": [0.5, 1.5, 0.5, 1.5, 3.0]})
+    w = mm.severity_weights(df, cfg)
+    assert list(w) == [1.0, 3.0, 5.0, 3.0, 1.0]
+    assert set(mm.severity_weights(df, mm.TrainConfig(weight_moderate=1.0, weight_severe=1.0))) == {1.0}
+
+
+def test_weighted_training_records_weights_and_regime_shifts(trained):
+    bundle, _, report, _ = trained
+    assert report["train_weight_counts"]
+    for k in ("q05_shift_a", "q05_shift_day_a", "q05_shift_night_a"):
+        assert bundle["models"][k] >= 0
+    assert set(report["bootstrap_ci_test"]) == set(ev.CI_SLICES)
+
+
+def test_regime_calibration_can_be_disabled():
+    w = make_mock_weather(days=120)
+    cfg = mm.TrainConfig(max_iter=30, backtest_folds=2, calibrate_by_regime=False)
+    b, _, _ = mm.train_pipeline(w, SEGMENTS, COND, cfg, ampacity_fn=mock_ampacity)
+    m = b["models"]
+    assert m["q05_shift_day_a"] == m["q05_shift_night_a"] == m["q05_shift_a"]
+
+
+def test_block_bootstrap_ci_is_ordered_and_handles_small_inputs():
+    rng = np.random.default_rng(0)
+    n = 2000
+    y = rng.normal(1000, 50, n)
+    q50, q05 = y + rng.normal(0, 5, n), y + rng.normal(-20, 15, n)
+    days = np.repeat(np.arange(n // 20), 20)
+    ci = ev.block_bootstrap_ci(y, q50, q05, days, seed=1)
+    for k in ("mae_a", "overestimation_frequency"):
+        assert ci[k]["ci_low"] <= ci[k]["estimate"] <= ci[k]["ci_high"]
+    assert "note" in ev.block_bootstrap_ci(y[:20], q50[:20], q05[:20], days[:20])
+    assert ev.block_bootstrap_ci(y, q50, q05, days, mask=np.zeros(n, bool)) == {"n": 0}
+
+
+def test_compare_configs_uses_validation_only_and_requires_same_split():
+    w = make_mock_weather(days=200)
+    ds = mm.build_training_dataset(w, SEGMENTS, COND, mock_ampacity)
+    base = mm.TrainConfig(max_iter=30)
+    table = mm.compare_configs(ds, {"unweighted": mm.TrainConfig(max_iter=30, weight_moderate=1.0, weight_severe=1.0),
+                                    "weighted": base})
+    assert list(table.index) == ["unweighted", "weighted"] and (table["val_mae_a"] > 0).all()
+    with pytest.raises(ValueError):
+        mm.compare_configs(ds, {"a": base, "b": mm.TrainConfig(train_frac=0.5)})
+
+
+def test_train_pipeline_accepts_prebuilt_dataset_and_skips_label_generation():
+    w = make_mock_weather(days=150)
+    ds = mm.build_training_dataset(w, SEGMENTS, COND, mock_ampacity)
+
+    def must_not_label_rows(f, c):  # static rating calls are allowed (sun-free static weather), rows are not
+        if f["solar_radiation"] != 0.0 or f.get("clearness_ratio") is None:
+            raise AssertionError("label generation should have been skipped")
+        return mock_ampacity(f, c)
+    b, _, rep = mm.train_pipeline(None, SEGMENTS, COND, mm.TrainConfig(max_iter=30, backtest_folds=2),
+                                  ampacity_fn=must_not_label_rows, dataset=ds)
+    assert rep["test"]["models"]
+    with pytest.raises(ValueError):
+        mm.train_pipeline(None, SEGMENTS, COND, dataset=ds.drop(columns=["crosswind_ms"]))
+
+
+def test_monotonic_constraint_is_respected():
+    w = make_mock_weather(days=150)
+    ds = mm.build_training_dataset(w, SEGMENTS, COND, mock_ampacity)
+    cfg = mm.TrainConfig(max_iter=40, monotonic=True)
+    splits = ev.chronological_split(ds)
+    m = mm.fit_models(splits["train"], splits["val"], cfg)
+    probe = splits["test"][mm.FEATURE_COLUMNS].iloc[[5]].copy()
+    grid = pd.concat([probe] * 40, ignore_index=True)
+    grid["air_temp_c"] = np.linspace(-10, 40, 40)
+    assert np.all(np.diff(m["hgb_q50"].predict(grid)) <= 1e-9)  # ampacity never increases with temperature
+    grid = pd.concat([probe] * 40, ignore_index=True)
+    grid["wind_speed_ms"] = np.linspace(0, 12, 40)
+    assert np.all(np.diff(m["hgb_q50"].predict(grid)) >= -1e-9)  # never decreases with wind speed
+
+
+def test_old_bundle_without_regime_shifts_still_predicts(trained):
+    bundle, _, _, weather = trained
+    old = dict(bundle)
+    old["models"] = {k: v for k, v in bundle["models"].items() if k not in ("q05_shift_day_a", "q05_shift_night_a")}
+    p = mm.predict_ampacity(weather.head(30), old)
+    assert (p["q05_ampacity_a"] <= p["q50_ampacity_a"]).all()

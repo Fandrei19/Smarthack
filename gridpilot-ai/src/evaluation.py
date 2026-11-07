@@ -131,11 +131,45 @@ DEFAULT_SLICES: dict[str, Callable[[pd.DataFrame], pd.Series]] = {
     "low_crosswind (<0.5 m/s)": lambda d: d["crosswind_ms"] < 0.5,
     "high_temp (>=30 C)": lambda d: d["air_temp_c"] >= 30.0,
     "low_wind & high_temp": lambda d: (d["wind_speed_ms"] < 1.0) & (d["air_temp_c"] >= 30.0),
+    # thresholds below must match TrainConfig.moderate_/severe_ defaults (28 C & 2 m/s; 30 C & 1 m/s)
+    "moderate_severity (T>=28C & wind<2)": lambda d: (d["air_temp_c"] >= 28.0) & (d["wind_speed_ms"] < 2.0),
+    "severe (T>=30C & wind<1)": lambda d: (d["air_temp_c"] >= 30.0) & (d["wind_speed_ms"] < 1.0),
     "daytime (sun up)": lambda d: d["sin_solar_altitude"] > 0.0,
     "night": lambda d: d["sin_solar_altitude"] <= 0.0,
     "strong_sun (GHI>=600 W/m2)": lambda d: d["solar_radiation"] >= 600.0,
     "high_wind (>=8 m/s)": lambda d: d["wind_speed_ms"] >= 8.0,
 }
+MODERATE_SLICE = "moderate_severity (T>=28C & wind<2)"
+CI_SLICES = ("all", "daytime (sun up)", "night", MODERATE_SLICE, "severe (T>=30C & wind<1)")
+
+
+def block_bootstrap_ci(y: np.ndarray, q50: np.ndarray, q05: np.ndarray, groups: np.ndarray,
+                       mask: np.ndarray | None = None, n_boot: int = 300, seed: int = 0,
+                       level: float = 0.95, min_groups: int = 10) -> dict[str, Any]:
+    """Block-bootstrap CI (resampling whole days, since hourly errors are autocorrelated and
+    segments share weather) for MAE of q50 [A] and overestimation frequency of q05."""
+    y, q50, q05 = (np.asarray(a, float) for a in (y, q50, q05))
+    m = np.ones(len(y), bool) if mask is None else np.asarray(mask, bool)
+    if m.sum() == 0:
+        return {"n": 0}
+    codes, uniq = pd.factorize(np.asarray(groups)[m])
+    g = len(uniq)
+    if g < min_groups:
+        return {"n": int(m.sum()), "n_blocks": g, "note": "too few day-blocks for a bootstrap CI"}
+    n_g = np.bincount(codes, minlength=g).astype(float)
+    s_abs = np.bincount(codes, weights=np.abs(y[m] - q50[m]), minlength=g)
+    s_vio = np.bincount(codes, weights=(q05[m] > y[m]).astype(float), minlength=g)
+    idx = np.random.default_rng(seed).integers(0, g, size=(n_boot, g))
+    tot = n_g[idx].sum(axis=1)
+    lo, hi = (1 - level) / 2 * 100, (1 + level) / 2 * 100
+    out: dict[str, Any] = {"n": int(m.sum()), "n_blocks": g}
+    for name, sums in (("mae_a", s_abs), ("overestimation_frequency", s_vio)):
+        boot = sums[idx].sum(axis=1) / tot
+        out[name] = {"estimate": float(sums.sum() / n_g.sum()),
+                     "ci_low": float(np.percentile(boot, lo)), "ci_high": float(np.percentile(boot, hi))}
+    return out
+
+
 SLICE_NOTE = ("Slice thresholds are fixed illustrative values (not derived from standards); "
               "slices with n < 30 should not be interpreted.")
 

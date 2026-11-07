@@ -84,9 +84,42 @@ class TrainConfig:
     min_samples_leaf: int = 40
     l2_regularization: float = 1.0
     backtest_folds: int = 4
+    # Severity sample weights (feature-based, never derived from the target).
+    # Set both weights to 1.0 for an unweighted model. Thresholds should match the
+    # evaluation slices in evaluation.DEFAULT_SLICES.
+    weight_moderate: float = 3.0
+    weight_severe: float = 5.0
+    moderate_temp_c: float = 28.0
+    moderate_wind_ms: float = 2.0
+    severe_temp_c: float = 30.0
+    severe_wind_ms: float = 1.0
+    # Separate conformal shift for day (sun up) and night; falls back to one global shift
+    # if a regime has fewer than MIN_REGIME_CAL_ROWS validation rows.
+    calibrate_by_regime: bool = True
+    # Optional physical monotonicity constraints (see MONOTONIC_CST); experimental.
+    monotonic: bool = False
+
+
+# Ampacity decreases with air temperature and solar radiation, increases with wind speed
+# (other features fixed). Derived features (crosswind etc.) stay unconstrained, so this is
+# only a partial regulariser. Requires scikit-learn >= 1.2 (dict form, DataFrame input).
+MONOTONIC_CST = {"air_temp_c": -1, "wind_speed_ms": 1, "solar_radiation": -1}
+MIN_REGIME_CAL_ROWS = 200
+
+
+def severity_weights(df: pd.DataFrame, cfg: TrainConfig) -> np.ndarray:
+    """Sample weights: 1 normally, ``weight_moderate`` / ``weight_severe`` in hot + low-wind
+    conditions. Uses weather features only (no label leakage)."""
+    t, v = df["air_temp_c"].to_numpy(), df["wind_speed_ms"].to_numpy()
+    w = np.ones(len(df))
+    w[(t >= cfg.moderate_temp_c) & (v < cfg.moderate_wind_ms)] = cfg.weight_moderate
+    w[(t >= cfg.severe_temp_c) & (v < cfg.severe_wind_ms)] = cfg.weight_severe
+    return w
 
 
 def _hgb(cfg: TrainConfig, **kw: Any) -> HistGradientBoostingRegressor:
+    if cfg.monotonic:
+        kw["monotonic_cst"] = dict(MONOTONIC_CST)
     return HistGradientBoostingRegressor(
         max_iter=cfg.max_iter, learning_rate=cfg.learning_rate, max_leaf_nodes=cfg.max_leaf_nodes,
         min_samples_leaf=cfg.min_samples_leaf, l2_regularization=cfg.l2_regularization,
@@ -206,20 +239,41 @@ def fit_models(train: pd.DataFrame, val: pd.DataFrame, cfg: TrainConfig) -> dict
     """Fit baselines + HGB models on ``train``; calibrate lower bounds on ``val`` (later in time)."""
     X, y = train[FEATURE_COLUMNS], train["target_ampacity_a"].to_numpy()
     Xv, yv = val[FEATURE_COLUMNS], val["target_ampacity_a"].to_numpy()
+    w = severity_weights(train, cfg)
     m: dict[str, Any] = {
         "dummy_median": DummyRegressor(strategy="median").fit(X, y),
         "dummy_q05": DummyRegressor(strategy="quantile", quantile=cfg.low_alpha).fit(X, y),
         "dummy_q95": DummyRegressor(strategy="quantile", quantile=cfg.high_alpha).fit(X, y),
         "linear": LinearRegression().fit(X, y),
-        "hgb_point": _hgb(cfg, loss="squared_error").fit(X, y),
-        "hgb_q05": _hgb(cfg, loss="quantile", quantile=cfg.low_alpha).fit(X, y),
-        "hgb_q50": _hgb(cfg, loss="quantile", quantile=0.5).fit(X, y),
-        "hgb_q95": _hgb(cfg, loss="quantile", quantile=cfg.high_alpha).fit(X, y),
+        "hgb_point": _hgb(cfg, loss="squared_error").fit(X, y, sample_weight=w),
+        "hgb_q05": _hgb(cfg, loss="quantile", quantile=cfg.low_alpha).fit(X, y, sample_weight=w),
+        "hgb_q50": _hgb(cfg, loss="quantile", quantile=0.5).fit(X, y, sample_weight=w),
+        "hgb_q95": _hgb(cfg, loss="quantile", quantile=cfg.high_alpha).fit(X, y, sample_weight=w),
     }
-    m["q05_shift_a"] = conformal_lower_shift(yv, m["hgb_q05"].predict(Xv), cfg.low_alpha)
+    q05_val = m["hgb_q05"].predict(Xv)
+    m["q05_shift_a"] = conformal_lower_shift(yv, q05_val, cfg.low_alpha)
+    m["q05_shift_day_a"], m["q05_shift_night_a"] = _regime_shifts(
+        val, yv, q05_val, cfg, m["q05_shift_a"])
     m["linear_shift_a"] = conformal_lower_shift(yv, m["linear"].predict(Xv), cfg.low_alpha)
     m["dummy_q05_shift_a"] = 0.0
+    m["train_weight_counts"] = {str(k): int(v) for k, v in zip(*np.unique(w, return_counts=True))}
     return m
+
+
+def _regime_shifts(val: pd.DataFrame, yv: np.ndarray, q05_val: np.ndarray, cfg: TrainConfig,
+                   global_shift: float) -> tuple[float, float]:
+    """(day, night) conformal shifts [A]. Day = sin_solar_altitude > 0. A single global
+    shift under-covers in one regime and over-covers in the other."""
+    if not cfg.calibrate_by_regime:
+        return global_shift, global_shift
+    day = val["sin_solar_altitude"].to_numpy() > 0.0
+    out = []
+    for mask in (day, ~day):
+        if mask.sum() >= MIN_REGIME_CAL_ROWS:
+            out.append(conformal_lower_shift(yv[mask], q05_val[mask], cfg.low_alpha))
+        else:
+            out.append(global_shift)
+    return out[0], out[1]
 
 
 def predict_quantiles(models: Mapping[str, Any], X: pd.DataFrame) -> dict[str, np.ndarray]:
@@ -228,7 +282,10 @@ def predict_quantiles(models: Mapping[str, Any], X: pd.DataFrame) -> dict[str, n
     Quantile crossing (independent models) is repaired by sorting the three values per row,
     which can only lower q05 / raise q95 (conservative). ``crossing`` flags repaired rows.
     """
-    q05 = models["hgb_q05"].predict(X) - models["q05_shift_a"]
+    glob = models["q05_shift_a"]
+    day = X["sin_solar_altitude"].to_numpy() > 0.0
+    shift = np.where(day, models.get("q05_shift_day_a", glob), models.get("q05_shift_night_a", glob))
+    q05 = models["hgb_q05"].predict(X) - shift
     q50, q95 = models["hgb_q50"].predict(X), models["hgb_q95"].predict(X)
     stacked = np.vstack([q05, q50, q95])
     crossing = np.any(np.diff(stacked, axis=0) < 0, axis=0)
@@ -293,27 +350,18 @@ def train_pipeline(weather: pd.DataFrame, segments: Sequence[Mapping[str, Any]],
                    conductor_config: Mapping[str, Any], cfg: TrainConfig = TrainConfig(),
                    ampacity_fn: pe.AmpacityFn = pe.calculate_ampacity,
                    dataset_path: str | Path | None = None, failures_path: str | Path | None = None,
-                   prebuilt_dataset: pd.DataFrame | None = None
+                   dataset: pd.DataFrame | None = None
                    ) -> tuple[dict[str, Any], pd.DataFrame, dict[str, Any]]:
     """Dataset -> chronological split -> fit -> evaluate -> deployable bundle.
 
     Returns (bundle, dataset, report). The bundle holds only the deployed quantile models.
+    Pass ``dataset`` (output of :func:`build_training_dataset`) to skip the slow label
+    generation; ``weather`` is then unused and may be None.
     """
-    if prebuilt_dataset is not None:
-        ds = prebuilt_dataset.copy()
-        required = set(FEATURE_COLUMNS + [
-            "timestamp_utc", "segment_id", "target_ampacity_a"
-        ])
-        missing = required - set(ds.columns)
-        if missing:
-            raise ValueError(f"Dataset preconstruit incomplet. Lipsesc: {sorted(missing)}")
-        if ds.empty:
-            raise ValueError("Datasetul preconstruit este gol.")
+    if dataset is None:
+        ds = build_training_dataset(weather, segments, conductor_config, ampacity_fn, dataset_path, failures_path)
     else:
-        ds = build_training_dataset(
-            weather, segments, conductor_config,
-            ampacity_fn, dataset_path, failures_path
-        )
+        ds = _check_dataset(dataset)
     geo = _geo_map(segments)
     static = {sid: pe.compute_static_rating(g, conductor_config, ampacity_fn) for sid, g in geo.items()
               if sid in set(ds["segment_id"])}
@@ -328,6 +376,12 @@ def train_pipeline(weather: pd.DataFrame, segments: Sequence[Mapping[str, Any]],
                                {"q50": dq["q50"], "q05": dq["q05"], "q95": dq["q95"]})
     res_val = _evaluate_split(val, models, static)
     res_val.pop("_deployed_preds")
+    frame = test.reset_index(drop=True)
+    days = frame["timestamp_utc"].dt.strftime("%Y-%m-%d").to_numpy()
+    y_test = test["target_ampacity_a"].to_numpy()
+    ci = {name: ev.block_bootstrap_ci(y_test, dq["q50"], dq["q05"], days,
+                                      np.asarray(ev.DEFAULT_SLICES[name](frame), dtype=bool), seed=cfg.random_state)
+          for name in ev.CI_SLICES}
     is_real = ampacity_fn is pe.calculate_ampacity
     report = {
         "created_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -337,12 +391,16 @@ def train_pipeline(weather: pd.DataFrame, segments: Sequence[Mapping[str, Any]],
         "split": {k: {"rows": len(v), "start": str(v["timestamp_utc"].min()), "end": str(v["timestamp_utc"].max())}
                   for k, v in splits.items()} | {"gap_hours": cfg.gap_hours},
         "q05_conformal_shift_a": models["q05_shift_a"],
+        "q05_shift_day_a": models["q05_shift_day_a"], "q05_shift_night_a": models["q05_shift_night_a"],
+        "train_weight_counts": models["train_weight_counts"],
+        "bootstrap_ci_test": ci,
         "test": res_test, "validation": res_val,
         "test_slices": slices, "slice_note": ev.SLICE_NOTE,
         "rolling_origin_backtest": rolling_origin_backtest(ds, cfg, static),
         "static_ratings_a": static, "config": asdict(cfg),
     }
-    deployed = {k: models[k] for k in ("hgb_q05", "hgb_q50", "hgb_q95", "q05_shift_a")}
+    deployed = {k: models[k] for k in ("hgb_q05", "hgb_q50", "hgb_q95", "q05_shift_a",
+                                       "q05_shift_day_a", "q05_shift_night_a")}
     bundle = {
         "format_version": 1,
         "feature_columns": list(FEATURE_COLUMNS),
@@ -362,6 +420,51 @@ def train_pipeline(weather: pd.DataFrame, segments: Sequence[Mapping[str, Any]],
         },
     }
     return bundle, ds, report
+
+
+def _check_dataset(dataset: pd.DataFrame) -> pd.DataFrame:
+    """Validate a pre-built training dataset (columns, UTC timestamps, finite targets)."""
+    need = ["timestamp_utc", "segment_id", *FEATURE_COLUMNS, "target_ampacity_a"]
+    missing = [c for c in need if c not in dataset.columns]
+    if missing:
+        raise ValueError(f"training dataset is missing columns: {missing}")
+    ds = dataset.copy()
+    ds["timestamp_utc"] = pd.to_datetime(ds["timestamp_utc"], utc=True)
+    ds["segment_id"] = ds["segment_id"].astype(str)
+    ds = ds[np.isfinite(ds["target_ampacity_a"].to_numpy(dtype=float))]
+    return ds.sort_values(["timestamp_utc", "segment_id"]).reset_index(drop=True)
+
+
+def compare_configs(dataset: pd.DataFrame, configs: Mapping[str, TrainConfig]) -> pd.DataFrame:
+    """Compare training configs (e.g. weight schemes) on the VALIDATION block only.
+
+    The test block is never touched, so choosing a config here does not leak the test set.
+    All configs must share the same split fractions. Metrics use the *uncalibrated* q05
+    (calibration is fitted on validation, so calibrated coverage there is circular);
+    judge coverage later, once, on the test block.
+    """
+    ds = _check_dataset(dataset)
+    base = next(iter(configs.values()))
+    if any((c.train_frac, c.val_frac, c.gap_hours) != (base.train_frac, base.val_frac, base.gap_hours)
+           for c in configs.values()):
+        raise ValueError("all configs must share train_frac / val_frac / gap_hours")
+    splits = ev.chronological_split(ds, base.train_frac, base.val_frac, base.gap_hours)
+    train, val = splits["train"], splits["val"]
+    val_f = val.reset_index(drop=True)
+    yv, Xv = val["target_ampacity_a"].to_numpy(), val[FEATURE_COLUMNS]
+    hard = np.asarray(ev.DEFAULT_SLICES[ev.MODERATE_SLICE](val_f), dtype=bool)
+    rows = []
+    for name, cfg in configs.items():
+        m = fit_models(train, val, cfg)
+        q50, q05 = m["hgb_q50"].predict(Xv), m["hgb_q05"].predict(Xv)
+        allm = ev.evaluate_predictions(yv, {"q50": q50, "q05": q05})
+        row = {"config": name, "val_mae_a": allm["mae_a"], "val_rmse_a": allm["rmse_a"],
+               "val_pinball_q05": allm["pinball_q05"], "n_moderate_hard": int(hard.sum())}
+        if hard.sum() >= 30:
+            hm = ev.evaluate_predictions(yv[hard], {"q50": q50[hard], "q05": q05[hard]})
+            row.update(hard_mae_a=hm["mae_a"], hard_rmse_a=hm["rmse_a"], hard_pinball_q05=hm["pinball_q05"])
+        rows.append(row)
+    return pd.DataFrame(rows).set_index("config")
 
 
 # ------------------------------------------------------------------------ export/load
@@ -432,6 +535,14 @@ def predict_ampacity(weather: pd.DataFrame | str | Path, bundle: Mapping[str, An
 
 
 # ------------------------------------------------------------------------------ CLI
+def _ci_rows(report: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    def fmt(d: Mapping[str, float]) -> str:
+        return f"{d['estimate']:.4g} [{d['ci_low']:.4g}, {d['ci_high']:.4g}]"
+    return {name: {"n": d["n"], "mae_a [95% CI]": fmt(d["mae_a"]),
+                   "overestimation_freq [95% CI]": fmt(d["overestimation_frequency"])}
+            for name, d in report.get("bootstrap_ci_test", {}).items() if "mae_a" in d}
+
+
 def _write_report(report: Mapping[str, Any], out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "evaluation_report.json").write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
@@ -443,7 +554,10 @@ def _write_report(report: Mapping[str, Any], out_dir: Path) -> None:
           f"Split: `{json.dumps(report['split'])}`", "",
           ev.results_to_markdown("Test set - models", report["test"]["models"], cols), "",
           ev.results_to_markdown("Test set - deployed model by weather slice", report["test_slices"], cols), "",
-          f"_{report['slice_note']}_", "", "### Static vs DLR lower bound (test)", "",
+          f"_{report['slice_note']}_", "",
+          ev.results_to_markdown("Day-block bootstrap 95% CI (test, deployed model)", _ci_rows(report),
+                                 ["n", "mae_a [95% CI]", "overestimation_freq [95% CI]"]), "",
+          "### Static vs DLR lower bound (test)", "",
           f"`{json.dumps(report['test']['static_vs_dlr'])}`", "", "### Rolling-origin backtest", "",
           ev.results_to_markdown("folds", {str(r['fold']): r for r in report["rolling_origin_backtest"]},
                                  ["n_test", "mae_a", "overestimation_freq_calibrated",
