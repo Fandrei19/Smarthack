@@ -4,7 +4,7 @@
 
 Prototip realizat pentru **24h to Power PPC – AI in energy, from data to action**. Beneficiarul operațional vizat este Rețele Electrice. Un producător precum PPC Renewables ar putea valorifica energia suplimentară dacă limita termică a liniei este constrângerea care îi reduce livrarea.
 
-> **Starea livrării.** Pipeline-ul meteo, modelul salvat și agentul rulează împreună în demo-ul offline. Dashboardul Streamlit și exportul automat din `src/report_generator.py` rămân etape de integrare.
+> **Starea livrării.** Pipeline-ul meteo, modelul salvat și agentul rulează împreună în demo-ul offline. Dashboardul Streamlit afișează prognoza și recomandările live. Exportul automat de rapoarte rămâne o etapă de integrare.
 
 ## De la vreme la acțiune
 
@@ -139,6 +139,15 @@ Validatorul verifică timestampurile, duplicatele, calitatea datelor, ordinea cu
 
 ## Dashboard și raportare
 
+Porniți dashboardul din directorul `gridpilot-ai`, într-un mediu Python 3.11 compatibil cu modelul curent.
+
+```bash
+python -m pip install "scikit-learn==1.6.1" "numpy==2.4.6" "pandas==2.2.3" streamlit
+python -m streamlit run app.py
+```
+
+Dashboardul preia prognoza pentru următoarele 24 de ore la prima deschidere și o actualizează aproximativ la 15 minute cât timp există o sesiune activă. După închiderea ultimei sesiuni, nu mai pornește actualizări. Dacă o rulare eșuează, afișează un avertisment și păstrează ultimul rezultat disponibil.
+
 În fluxul țintă, operatorul selectează sursa meteo sau un scenariu offline și vede profilul orar al limitei statice și dinamice, intervalul q05–q95 pentru segmente, segmentul limitativ și acțiunea recomandată. Raportul preia ora UTC, sursa, calitatea intrărilor, limitele în amperi, motivul și indicatorul de revizuire umană. JSON-ul generat de demo oferă un exemplu de contract pe care se poate integra interfața.
 
 ## Impact economic și sustenabilitate
@@ -178,5 +187,5 @@ gridpilot-ai/
 │   ├── agent.py            Orchestrare și exportul deciziilor JSON
 │   └── report_generator.py Punct rezervat pentru raportare
 ├── tests/
-└── app.py                  Punct rezervat pentru dashboard
+└── app.py                  Dashboard și actualizare pe durata sesiunii
 ```

@@ -1,6 +1,5 @@
 import json
 import pandas as pd
-import streamlit as st
 
 # lists defining the mandatory columns required in both datasets to ensure data integrity before further processing
 WEATHER_COLS = ["timestamp_utc", "segment_id", "air_temp_c", "wind_speed_ms",
@@ -28,8 +27,7 @@ def clean(df):
     return df.dropna(subset=["timestamp"]).drop_duplicates(["timestamp", "segment_id"])
 
 
-# cached data loading
-@st.cache_data
+# The live snapshots are small and can change between dashboard runs.
 def load_weather(path="data/weather.csv"):
     df = pd.read_csv(path)
     check(df, WEATHER_COLS, "weather.csv")
@@ -44,7 +42,6 @@ def load_weather(path="data/weather.csv"):
     return clean(df)
 
 
-@st.cache_data
 def load_predictions(path="data/predictions.csv"):
     df = pd.read_csv(path)
     check(df, PRED_COLS, "predictions.csv")
@@ -62,7 +59,6 @@ def load_predictions(path="data/predictions.csv"):
     return clean(df)
 
 # opens and parses agent results, returning them as a dict with utf-8 encoding
-@st.cache_data
 def load_agent(path="data/agent_results.json"):
     with open(path, encoding="utf-8") as f:
         return json.load(f)

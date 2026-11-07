@@ -3,7 +3,6 @@ import streamlit as st
 import altair as alt 
 
 from src.dashboard_service import get_dashboard_data
-from src.data_processor import filter_window
 
 st.title("Overview")
 
@@ -21,8 +20,12 @@ combined = data["combined"]
 latest = data["latest"]
 agent = data["agent"]
 
-if isinstance(agent, list):                 # if the agent contains a list of historical decisions, it extracts only the most recent one
-    agent = agent[-1] if agent else {}
+if isinstance(agent, list):
+    first_hour = combined["timestamp"].min()
+    agent = next(
+        (row for row in agent if pd.to_datetime(row.get("timestamp_utc"), utc=True) == first_hour),
+        {},
+    )
 
 # checks if the dataset is empty
 if combined.empty:
@@ -40,19 +43,20 @@ def fmt(value, unit = "", decimals = 0, signed = False):
 
 # segment list extraction and timestamp display
 segments = sorted(latest.index)
-critical = agent.get("critical_segment")
-ts = combined["timestamp"].max()
-st.caption(f"Last updated: {ts:%Y-%m-%d %H:%M}")
+critical = agent.get("bottleneck_segment")
+ts = combined["timestamp"].min()
+st.caption(f"First forecast hour: {ts:%Y-%m-%d %H:%M UTC}")
 
 # agent status
-status = str(agent.get("status", "")).upper()
+status = str(agent.get("risk_level", "")).upper()
 banner = {
-    "CRITICAL": st.error, 
-    "WARNING": st.warning
-    }.get(status, st.success)
+    "HIGH": st.error,
+    "UNCERTAIN": st.warning,
+    "MEDIUM": st.warning,
+    "LOW": st.success,
+}.get(status, st.info)
 
-banner(f"**{status or 'N/A'}** · {agent.get('decision', 'N/A')} · "
-       f"confidence: {agent.get('confidence', 'N/A')}")
+banner(f"**{status or 'N/A'}** · {agent.get('action', 'N/A')}")
 
 
 # --- key performance indicators (KPI grid)
@@ -72,7 +76,7 @@ line_gain_pct = line_gain / static * 100
 gain_label = (None if pd.isna(line_gain)
               else f"{line_gain:+.0f} A ({line_gain_pct:+.1f}%) vs. static")
 
-n_alerts = len(agent.get("alerts", []))
+n_alerts = int(bool(agent.get("requires_human_review")))
 
 
 # --- line KPIs
@@ -122,9 +126,9 @@ with left:
     with st.container(border = True):
         st.subheader("Line & Segment Ampacity Over Time")
         hours = st.selectbox("Interval", [6, 12, 24], index = 2,
-                             format_func = lambda h: f"Last {h}h")
+                             format_func = lambda h: f"Next {h}h")
 
-        window = filter_window(combined, hours)
+        window = combined[combined["timestamp"] < ts + pd.Timedelta(hours=hours)]
         
         chart_data = window.pivot(index = "timestamp", columns = "segment_id",
                                   values = "predicted_ampacity")
@@ -206,7 +210,7 @@ with right:
 with st.container(border=True):
     st.subheader("Agent Recommendation")
     st.write(f"**Reason:** {agent.get('reason', 'N/A')}")
-    st.write(f"**Action:** {agent.get('recommended_action', 'N/A')}")
+    st.write(f"**Action:** {agent.get('action', 'N/A')}")
     
     for a in agent.get("alerts", []):
         sev = str(a.get("severity", "")).upper()
