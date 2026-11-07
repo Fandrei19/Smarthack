@@ -1,0 +1,92 @@
+[theme]
+base = "light"
+font = "sans serif"
+baseRadius = "10px"
+showSidebarBorder = true
+
+
+# light theme
+
+[theme.light]
+primaryColor = "#2c7da0"
+backgroundColor = "#f4f8fb"
+secondaryBackgroundColor = "#eaf3f8"
+textColor = "#012a4a"
+borderColor = "#d3e3ec"
+linkColor = "#2a6f97"
+
+chartCategoricalColors = [
+    "#012a4a",
+    "#013a63",
+    "#01497c",
+    "#014f86",
+    "#2a6f97",
+    "#2c7da0",
+    "#468faf",
+    "#61a5c2",
+    "#89c2d9",
+    "#a9d6e5"
+]
+
+chartSequentialColors = [
+    "#012a4a",
+    "#013a63",
+    "#01497c",
+    "#014f86",
+    "#2a6f97",
+    "#2c7da0",
+    "#468faf",
+    "#61a5c2",
+    "#89c2d9",
+    "#a9d6e5"
+]
+
+[theme.light.sidebar]
+backgroundColor = "#012a4a"
+secondaryBackgroundColor = "#013a63"
+primaryColor = "#61a5c2"
+textColor = "#ffffff"
+
+
+
+# dark theme
+
+[theme.dark]
+primaryColor = "#61a5c2"
+backgroundColor = "#071522"
+secondaryBackgroundColor = "#10283a"
+textColor = "#e6f1f7"
+borderColor = "#29475c"
+linkColor = "#89c2d9"
+
+chartCategoricalColors = [
+    "#a9d6e5",
+    "#89c2d9",
+    "#61a5c2",
+    "#468faf",
+    "#2c7da0",
+    "#2a6f97",
+    "#014f86",
+    "#01497c",
+    "#013a63",
+    "#012a4a"
+]
+
+chartSequentialColors = [
+    "#012a4a",
+    "#013a63",
+    "#01497c",
+    "#014f86",
+    "#2a6f97",
+    "#2c7da0",
+    "#468faf",
+    "#61a5c2",
+    "#89c2d9",
+    "#a9d6e5"
+]
+
+[theme.dark.sidebar]
+backgroundColor = "#050e18"
+secondaryBackgroundColor = "#10283a"
+primaryColor = "#61a5c2"
+textColor = "#e6f1f7"
