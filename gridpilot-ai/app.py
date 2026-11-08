@@ -46,7 +46,7 @@ def live_status():
     previous = st.session_state.get("displayed_live_update")
     was_rendered = "displayed_live_update" in st.session_state
     st.session_state["displayed_live_update"] = updated
-    
+
     if updated is not None:
         st.caption(f"Forecast refreshed {updated:%d %b %Y, %H:%M UTC}")
         if was_rendered and previous != updated:
@@ -109,7 +109,7 @@ pages = {
 }
 
 pg = st.navigation(
-    pages, 
+    pages,
     # position = "top"
 )
 

@@ -480,7 +480,7 @@ def load_model(path: str | Path | None = None) -> dict[str, Any]:
     p = Path(path) if path else DEFAULT_MODEL_PATH
     if not p.exists():
         raise FileNotFoundError(f"model file not found: {p}")
-    
+
     bundle = joblib.load(p)
     needed = {"format_version", "feature_columns", "models", "segments", "static_rating_a", "metadata"}
     if not isinstance(bundle, dict) or not needed <= bundle.keys():

@@ -28,7 +28,7 @@ latest = data["latest"]
 agent = data["agent"]
 ts = data["hour"]
 
-if isinstance(agent, list):  
+if isinstance(agent, list):
     agent = next((d for d in agent if pd.to_datetime(d.get("timestamp_utc"), utc=True) == ts), {})
 
 def fmt(value, unit="", decimals=0):
