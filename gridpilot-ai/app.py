@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from subprocess import CalledProcessError
+from subprocess import CalledProcessError, TimeoutExpired
 from threading import Lock
 from time import monotonic
 
@@ -24,16 +24,19 @@ def live_refresh_state():
 @st.fragment(run_every="1min")
 def live_status():
     state = live_refresh_state()
+    manual = st.button("Refresh now", key="refresh_live_now")
+    st.caption("Open-Meteo forecast · refresh every 15 min while the app is open · UTC")
     with state["lock"]:
         now = monotonic()
-        if state["attempted"] is None or now - state["attempted"] >= 15 * 60:
+        if manual or state["attempted"] is None or now - state["attempted"] >= 15 * 60:
             state["attempted"] = now
             try:
                 with st.spinner("Refreshing forecast and agent decisions…"):
                     refresh_live_data()
-            except (CalledProcessError, OSError):
+            except (CalledProcessError, OSError, TimeoutExpired):
                 state["error"] = True
             else:
+                st.cache_data.clear()
                 state["updated"] = datetime.now(timezone.utc)
                 state["error"] = False
         updated, error = state["updated"], state["error"]
@@ -43,6 +46,7 @@ def live_status():
     previous = st.session_state.get("displayed_live_update")
     was_rendered = "displayed_live_update" in st.session_state
     st.session_state["displayed_live_update"] = updated
+    
     if updated is not None:
         st.caption(f"Forecast refreshed {updated:%d %b %Y, %H:%M UTC}")
         if was_rendered and previous != updated:
@@ -67,12 +71,6 @@ monitoring = st.Page(
     icon = ":material/electric_bolt:"
 )
 
-agent = st.Page(
-    "pages/ai_agent.py",
-    title = "AI Agent",
-    icon = ":material/smart_toy:"
-)
-
 alerts = st.Page(
     "pages/alerts.py",
     title = "Alerts",
@@ -91,6 +89,8 @@ settings = st.Page(
     icon = ":material/settings:"
 )
 
+history = st.Page("pages/history.py", title="Weather History", icon=":material/history:")
+
 # sidebar
 st.sidebar.title("⚡ GridPilot AI")
 st.sidebar.caption("Grid Intelligence Platform")
@@ -103,8 +103,8 @@ with st.sidebar:
 # navigation
 pages = {
     "MONITORING": [overview, monitoring, maps],
-    "ACTIONS": [agent, alerts],
-    "ANALYTICS": [reports],
+    "ACTIONS": [alerts],
+    "ANALYTICS": [history, reports],
     "CONFIGURATION": [settings]
 }
 

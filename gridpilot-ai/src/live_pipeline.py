@@ -1,6 +1,8 @@
 """Refresh the live weather, predictions and decisions on a schedule."""
 
 import argparse
+import json
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
@@ -27,8 +29,18 @@ def refresh_live_data():
             ["src.agent", "--predictions", str(predictions), "--output", str(decisions)],
         )
         for args in commands:
-            subprocess.run([sys.executable, "-B", "-m", *args], cwd=ROOT, check=True)
+            subprocess.run([sys.executable, "-B", "-m", *args], cwd=ROOT, check=True, timeout=180)
 
+        # Preserve each successful forecast run, including its retrieval time.
+        fetched = datetime.now(timezone.utc)
+        archive = ROOT / "data" / "archive" / fetched.strftime("%Y%m%dT%H%M%S%fZ")
+        archive.mkdir(parents=True)
+        for file in (weather, predictions, decisions):
+            shutil.copy2(file, archive / file.name)
+        (archive / "metadata.json").write_text(json.dumps({
+            "retrieved_at_utc": fetched.isoformat(),
+            "kind": "archived_forecast", "source": "OPEN_METEO_FORECAST"
+        }), encoding="utf-8")
         for file in (weather, predictions, decisions):
             file.replace(OUTPUT_DIR / file.name)
 
@@ -45,7 +57,7 @@ def main():
         while True:
             try:
                 refresh_live_data()
-            except (subprocess.CalledProcessError, OSError) as exc:
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
                 print(f"Live refresh failed: {exc}", file=sys.stderr, flush=True)
                 if args.once:
                     return 1

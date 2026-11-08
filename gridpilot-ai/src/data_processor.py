@@ -45,3 +45,14 @@ def line_rating_by_time(df):
             "static_rating": g["static_rating"].min(),
         })
     return pd.DataFrame(rows)
+
+
+filter_window = filter_forecast_window
+
+
+def focus_hour(df):
+    times = df["timestamp"].drop_duplicates().sort_values()
+    if times.empty:
+        return pd.NaT
+    upcoming = times[times >= pd.Timestamp.now(tz="UTC").floor("h")]
+    return upcoming.iloc[0] if not upcoming.empty else times.iloc[-1]

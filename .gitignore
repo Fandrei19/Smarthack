@@ -58,3 +58,6 @@ dist/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Local archived forecast runs
+/gridpilot-ai/data/archive/
