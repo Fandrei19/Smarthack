@@ -42,10 +42,10 @@ git clone https://github.com/Fandrei19/Smarthack.git
 cd Smarthack/gridpilot-ai
 py -3.11 -m venv .venv
 .venv/Scripts/python.exe -m pip install --upgrade pip
-.venv/Scripts/python.exe -m pip install "numpy==2.4.6" "pandas==2.2.3" "scikit-learn==1.6.1" "joblib==1.6.0" "streamlit==1.67.0" "linerate==5.0.0" pytest matplotlib
+.venv/Scripts/python.exe -m pip install -r requirements.txt
 ```
 
-The existing `requirements.txt` contains only NumPy and pandas; **it is not sufficient for the complete application**. The command above also installs ML, UI, physics, and testing dependencies. On Linux/macOS, use `python3.11 -m venv .venv` and `.venv/bin/python` instead of the Windows executable.
+`requirements.txt` includes the complete set of direct dependencies for weather processing, ML, physics, the dashboard, investment plots, and tests. Versions are pinned to the verified Python 3.11 environment; transitive dependencies are resolved by pip. A forwarding `requirements.txt` at the repository root supports installation from either directory. On Linux/macOS, use `python3.11 -m venv .venv` and `.venv/bin/python` instead of the Windows executable.
 
 Run all subsequent commands from `gridpilot-ai` with the environment activated. In PowerShell, replace `python` with `.venv/Scripts/python.exe` if environment activation is restricted.
 

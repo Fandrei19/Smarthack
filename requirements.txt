@@ -1,0 +1,2 @@
+# Install the full application from the repository root.
+-r gridpilot-ai/requirements.txt
