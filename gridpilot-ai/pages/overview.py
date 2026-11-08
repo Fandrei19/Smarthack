@@ -1,17 +1,20 @@
 import altair as alt
 import pandas as pd
 import streamlit as st
+from pathlib import Path
+import json
+from src.live_monitor import live_monitor
 
 from src.dashboard_service import get_dashboard_data
 from src.data_processor import filter_window, line_rating_by_time
 
-st.title("⚡ Grid status")
-
-# load data
+st.title("⚡ GridPilot AI — Dobrogea Live Overview")
+live_monitor()
+# Load real data from processed folder via dashboard service
 try:
     data = get_dashboard_data()
 except FileNotFoundError as e:
-    st.error(f"Missing file: {e.filename}")
+    st.error(f"Missing required data file: {e.filename}. Please run the pipeline or place files in data/processed/.")
     st.stop()
 except ValueError as e:
     st.error(str(e))
@@ -20,37 +23,32 @@ except ValueError as e:
 combined = data["combined"]
 
 if combined.empty:
-    st.warning("No weather/prediction data to display.")
+    st.warning("No processed prediction or weather data available in data/processed/.")
     st.stop()
 
 latest = data["latest"]
 agent = data["agent"]
-ts = combined["timestamp"].max()
+ts = data["hour"]
 
-if isinstance(agent, list):  # pick the decision for the displayed hour
-    agent = next((d for d in agent
-                  if pd.to_datetime(d.get("timestamp_utc"), utc=True) == ts), {})
-
+if isinstance(agent, list):  
+    agent = next((d for d in agent if pd.to_datetime(d.get("timestamp_utc"), utc=True) == ts), {})
 
 def fmt(value, unit="", decimals=0):
     return "Unavailable" if pd.isna(value) else f"{value:.{decimals}f}{unit}"
 
-
-# agent action in everyday words: (alert style, icon, headline, explanation)
+# Decision dictionary mapping agent actions to clear, human-friendly explanations
 DECISIONS = {
     "RECOMMEND_DYNAMIC_RATING": ("success", "🟢", "The line can carry more than usual",
-                                 "Today's weather cools the cables well, so there is room to spare."),
-    "KEEP_STATIC": ("warning", "🟡", "Stick to the usual limit",
-                    "There is some extra room, but not enough to change anything."),
-    "OPERATOR_REVIEW": ("error", "🔴", "Please take a look",
-                        "The extra room is almost gone, so a person should decide."),
-    "FALLBACK_STATIC": ("warning", "🟡", "Play it safe for now",
-                        "Some data is missing, so we can't trust the estimate."),
+                                 "Current weather conditions favor cable cooling, offering safe extra capacity."),
+    "KEEP_STATIC": ("warning", "🟡", "Stick to the standard rating",
+                    "Extra thermal headroom exists, but remains below the safety switching margin."),
+    "OPERATOR_REVIEW": ("error", "🔴", "Operator review required",
+                    "Thermal margins are tight; manual engineering oversight is recommended."),
+    "FALLBACK_STATIC": ("warning", "🟡", "Fallback to static rating",
+                    "Incomplete or stale sensor data requires conservative operation."),
 }
 
-
 def room_status(pct):
-    """Traffic light for a segment, using the same cut-offs as the agent (R = 0.80 / 0.95)."""
     if pd.isna(pct):
         return "⚪", "No data"
     if pct >= 25:
@@ -59,103 +57,89 @@ def room_status(pct):
         return "🟡", "Limited room"
     return "🔴", "Almost no room"
 
+amp = latest.get("predicted_ampacity", pd.Series(dtype=float))
+static_vals = latest.get("static_rating", pd.Series([0]))
+static = static_vals.min() if not static_vals.empty else 0
 
-amp = latest["predicted_ampacity"]
-static = latest["static_rating"].min()
-
-if amp.isna().any():
+if amp.isna().any() or amp.empty:
     line_rating, bottleneck = float("nan"), None
 else:
     line_rating, bottleneck = amp.min(), amp.idxmin()
 
-segments = sorted(latest.index)
-gain = line_rating - static
+segments = sorted(latest.index) if not latest.empty else []
+gain = line_rating - static if not pd.isna(line_rating) else 0
 
-st.caption(f"Based on the latest data: {ts:%b %d, %H:%M} UTC")
+st.caption(f"Forecast for {ts:%b %d, %Y - %H:%M} UTC. Weather is forecast data, while the model was trained "
+           "on historical reanalysis; the q05–q95 range covers model error only, not forecast error.")
 
-# 1. the answer
+# 1. Main System Status & Agent Recommendation
 if agent:
-    kind, icon, headline, why = DECISIONS.get(agent.get("action"),
-                                              ("info", "ℹ️", str(agent.get("action", "N/A")), ""))
+    action_key = agent.get("action", "KEEP_STATIC")
+    kind, icon, headline, why = DECISIONS.get(action_key, ("info", "ℹ️", str(action_key), ""))
     with st.container(border=True):
-        getattr(st, kind)(f"## {icon} {headline}\n{why}")
-        if not pd.isna(gain):
+        getattr(st, kind)(f"### {icon} {headline}\n{why}")
+        if not pd.isna(gain) and static > 0:
             a, b = st.columns(2)
-            a.metric("Right now the line can carry", fmt(line_rating, " A"),
-                     f"{gain:+.0f} A ({gain / static * 100:+.0f}%) vs. the usual limit",
-                     help="Set by the weakest segment, using a cautious (q05) estimate.")
-            b.metric("Usual limit", fmt(static, " A"),
-                     help="The fixed limit that applies in any weather.")
-        st.caption(f"Agent's note: {agent.get('reason', 'N/A')}")
-        if agent.get("human_review"):
-            st.write("👤 **A person needs to confirm this decision.**")
+            a.metric("Current Dynamic Rating Capacity", fmt(line_rating, " A"),
+                     f"{gain:+.0f} A ({gain / static * 100:+.0f}%) vs. Static Limit",
+                     help="Governed by the weakest monitored line segment using Q05 conservative bounds.")
+            b.metric("Standard Static Limit", fmt(static, " A"),
+                     help="Fixed seasonal thermal threshold.")
+        st.caption(f"AI Agent Rationale: {agent.get('reason', 'Standard operation active.')}")
+        if agent.get("requires_human_review") or agent.get("human_review"):
+            st.warning("👤 **Human operator confirmation required for this hour.**")
 else:
-    st.info("The agent has no decision for this hour.")
+    st.info("No active agent decision logged for this specific timestamp.")
 
-
-# 2. why: the weakest segment
-if bottleneck:
+# 2. Bottleneck Analysis
+if bottleneck and bottleneck in latest.index:
     r = latest.loc[bottleneck]
-    st.info(f"**Why this number?** The line is only as strong as its weakest part, "
-            f"**{bottleneck}**: wind {fmt(r['wind_speed'], ' m/s', 1)}, "
-            f"{fmt(r['temperature'], ' °C', 1)}, sun {fmt(r['solar_radiation'], ' W/m²')}. "
-            f"Less wind and more sun or heat mean less cooling.")
+    st.info(f"**Critical Bottleneck Identified:** Segment **{bottleneck}** is limiting the corridor capacity. "
+            f"Conditions: Wind {fmt(r.get('wind_speed', 0), ' m/s', 1)}, "
+            f"Temperature {fmt(r.get('temperature', 0), ' °C', 1)}, Solar Radiation {fmt(r.get('solar_radiation', 0), ' W/m²')}.")
 
+# 3. Segment Breakdown Cards
+st.subheader("Dobrogea Line Segments Health Status")
+if segments:
+    cols = st.columns(min(len(segments), 3))
+    for i, s in enumerate(segments):
+        col = cols[i % len(cols)]
+        row = latest.loc[s]
+        extra_pct = row.get("extra_pct", 0)
+        dot, label = room_status(extra_pct)
+        with col.container(border=True):
+            st.markdown(f"#### {dot} Segment {s}")
+            st.markdown(f"**Status:** {label}" + (" *(Bottleneck)*" if s == bottleneck else ""))
+            st.metric("Ampacity Limit", fmt(row.get("predicted_ampacity"), " A"),
+                      None if pd.isna(extra_pct) else f"{extra_pct:+.0f}% headroom")
 
-limit_agent = agent.get("limiting_segment")
-if bottleneck and limit_agent and bottleneck != limit_agent:
-    st.warning(f"The predictions point to {bottleneck}, but the agent says {limit_agent}.")
+# 4. 24-Hour Historical & Forecast Trend
+st.subheader("24-Hour Corridor Thermal Envelope")
+try:
+    line_df = line_rating_by_time(filter_window(combined, 24))
+    if not line_df.empty:
+        base = alt.Chart(line_df).encode(x=alt.X("timestamp:T", title="UTC Time", scale=alt.Scale(type="utc")))
 
+        rating = base.mark_area(opacity=0.2, color="#2ca02c").encode(
+            y=alt.Y("line_rating:Q", title="Ampacity (Amps)", scale=alt.Scale(zero=False)),
+            y2="static_rating:Q")
 
-# 3. segments with traffic lights
-st.subheader("How is each part of the line doing?")
-cols = st.columns(len(segments))
-for col, s in zip(cols, segments):
-    row = latest.loc[s]
-    dot, label = room_status(row["extra_pct"])
-    with col.container(border=True):
-        st.markdown(f"### {dot} {s}")
-        st.markdown(f"**{label}**" + (" · weakest part" if s == bottleneck else ""))
-        st.metric("Can carry", fmt(row["predicted_ampacity"], " A"),
-                  None if pd.isna(row["extra_pct"]) else f"{row['extra_pct']:+.0f}% vs. usual limit")
+        rating_line = base.mark_line(color="#2ca02c", point=True).encode(
+            y="line_rating:Q",
+            tooltip=["timestamp:T", alt.Tooltip("line_rating:Q", format=".0f", title="Dynamic Rating (A)"),
+                     alt.Tooltip("limiting_segment:N", title="Bottleneck Segment")])
 
-# 4. last 24h
-st.subheader("How has it changed today?")
-line_df = line_rating_by_time(filter_window(combined, 24))
+        static_line = base.mark_line(strokeDash=[4, 4], color="#7f7f7f").encode(y="static_rating:Q")
 
-base = alt.Chart(line_df).encode(x=alt.X("timestamp:T", title="Time (UTC)", scale=alt.Scale(type="utc")))
+        st.altair_chart((rating + rating_line + static_line).properties(height=280), use_container_width=True)
+        st.caption("Green area = DLR extra capacity above the standard static rating (dashed gray line).")
+    else:
+        st.info("Insufficient time-series data for the past 24 hours.")
+except Exception as e:
+    st.info(f"Could not render trend chart: {e}")
 
-rating = base.mark_area(opacity=0.15, color="#2ca02c").encode(
-    y=alt.Y("line_rating:Q", title="Amps (A)", scale=alt.Scale(zero=False)),
-    y2="static_rating:Q")
-
-rating_line = base.mark_line(color="#2ca02c", point=True).encode(
-    y="line_rating:Q",
-    tooltip=["timestamp:T", alt.Tooltip("line_rating:Q", format=".0f", title="Can carry"),
-             alt.Tooltip("limiting_segment:N", title="Weakest part")])
-
-static_line = base.mark_line(strokeDash=[5, 5], color="#7f7f7f").encode(y="static_rating:Q")
-
-st.altair_chart((rating + rating_line + static_line).properties(height=260),use_container_width=True)
-
-st.caption("Green line = what the line can carry. Dashed gray = the usual limit. "
-           "The shaded gap is the extra room. Gaps in the line = missing data.")
-
-# 5. learn more
-with st.expander("How does the agent decide?"):
-    st.write(f"It divides the usual limit by what the line can carry now. "
-             f"This hour that is **{fmt(agent.get('ratio'), '', 2)}**.")
-    
-    st.markdown(
-        "- **0.80 or lower:** the line can carry more than usual\n"
-        "- **0.80 to 0.95:** stick to the usual limit\n"
-        "- **above 0.95:** a person should look\n"
-        "- **missing data:** play it safe")
-    st.caption("These thresholds are assumptions made for the prototype.")
-
-
-l1, l2 = st.columns(2)
-l1.page_link("pages/line_monitoring.py", label="See details and weather",
-             icon=":material/electric_bolt:")
-
-l2.page_link("pages/ai_agent.py", label="Ask the agent", icon=":material/smart_toy:")
+# Navigation Links
+st.divider()
+nav1, nav2 = st.columns(2)
+nav1.page_link("pages/line_monitoring.py", label="Open Live Telemetry Monitor", icon=":material/monitoring:")
+nav2.page_link("pages/alerts.py", label="View Agent Action Proposals", icon=":material/notifications_active:")

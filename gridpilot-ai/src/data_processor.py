@@ -19,8 +19,8 @@ def latest_snapshot(df):
 
 # filters the dataset to a specific time window
 def filter_window(df, hours=24):
-    start = df["timestamp"].max() - pd.Timedelta(hours=hours)
-    return df[df["timestamp"] >= start]
+    start = df["timestamp"].min()
+    return df[df["timestamp"] < start + pd.Timedelta(hours=hours)]
 
 
 def line_rating_by_time(df):
@@ -37,3 +37,13 @@ def line_rating_by_time(df):
             "static_rating": g["static_rating"].min(),
         })
     return pd.DataFrame(rows)
+
+
+def focus_hour(df):
+    """Hour treated as 'now': the first forecast hour that is not in the past.
+    Falls back to the last hour if the whole file is in the past."""
+    times = df["timestamp"].drop_duplicates().sort_values()
+    if times.empty:
+        return pd.NaT
+    upcoming = times[times >= pd.Timestamp.now(tz="UTC").floor("h")]
+    return upcoming.iloc[0] if not upcoming.empty else times.iloc[-1]

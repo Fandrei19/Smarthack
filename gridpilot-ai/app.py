@@ -34,6 +34,7 @@ def live_status():
             except (CalledProcessError, OSError):
                 state["error"] = True
             else:
+                st.cache_data.clear()
                 state["updated"] = datetime.now(timezone.utc)
                 state["error"] = False
         updated, error = state["updated"], state["error"]
@@ -43,6 +44,7 @@ def live_status():
     previous = st.session_state.get("displayed_live_update")
     was_rendered = "displayed_live_update" in st.session_state
     st.session_state["displayed_live_update"] = updated
+    
     if updated is not None:
         st.caption(f"Forecast refreshed {updated:%d %b %Y, %H:%M UTC}")
         if was_rendered and previous != updated:
@@ -65,12 +67,6 @@ monitoring = st.Page(
     "pages/line_monitoring.py",
     title = "Line Monitoring",
     icon = ":material/electric_bolt:"
-)
-
-agent = st.Page(
-    "pages/ai_agent.py",
-    title = "AI Agent",
-    icon = ":material/smart_toy:"
 )
 
 alerts = st.Page(
@@ -103,7 +99,7 @@ with st.sidebar:
 # navigation
 pages = {
     "MONITORING": [overview, monitoring, maps],
-    "ACTIONS": [agent, alerts],
+    "ACTIONS": [alerts],
     "ANALYTICS": [reports],
     "CONFIGURATION": [settings]
 }
