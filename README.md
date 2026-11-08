@@ -1,41 +1,41 @@
 # GridPilot AI
 
-**Agent de suport decizional pentru capacitatea dinamică a unei linii electrice aeriene simulate în Dobrogea.**
+**A decision-support agent for the dynamic capacity of a simulated overhead power line in Dobrogea, Romania.**
 
-Proiect pentru **24h to Power PPC – AI in energy, from data to action**. Domeniul vizat este operarea rețelei, relevant pentru **Rețele Electrice**, cu beneficii potențiale pentru producători precum **PPC Renewables** atunci când transportul energiei este limitat de capacitatea termică a conductorului.
+Built for **24h to Power PPC – AI in energy, from data to action**. The target domain is grid operation, relevant to **Rețele Electrice**, with potential benefits for producers such as **PPC Renewables** when electricity delivery is constrained by conductor thermal capacity.
 
-GridPilot colectează vremea, rulează un model ML antrenat de echipă, identifică segmentul restrictiv și publică recomandări și alerte pentru operator. Include dashboard, prognoză actualizată automat, istoric și exporturi CSV/JSON.
+GridPilot retrieves weather data, runs a locally trained ML model, identifies the limiting segment, and publishes operator recommendations and alerts. It includes a dashboard, automatically refreshed forecasts, historical data exploration, and CSV/JSON exports.
 
-> **Prototip de simulare, nu sistem de comandă a rețelei.** Nu utilizăm telemetrie PPC, nu avem conexiune SCADA și nu comandăm centrale sau întreruptoare. Capacitatea estimată în amperi nu reprezintă curent măsurat. P1–P3 de pe hartă sunt amplasamente ilustrative; injecțiile lor de putere nu sunt modelate.
+> **Simulation prototype, not a grid control system.** We do not use PPC telemetry, connect to SCADA, or control generators or circuit breakers. Estimated capacity in amperes is not measured current. P1–P3 on the map are illustrative sites; their power injections are not modeled.
 
-## 1. Problema și soluția
+## 1. Problem and solution
 
-O limită statică se bazează pe condiții meteo de referință. Răcirea conductorului variază însă cu vântul, temperatura și radiația solară. GridPilot estimează capacitatea pentru fiecare oră și arată când condițiile sugerează o capacitate suplimentară sau necesitatea verificării umane.
+A static rating is based on reference weather conditions. Actual conductor cooling varies with wind, air temperature, and solar radiation. GridPilot estimates hourly capacity and indicates when conditions suggest additional capacity or require human review.
 
-Linia este simplificată la trei segmente în serie. Limita întregii linii este minimul limitelor segmentelor pentru aceeași oră. Un câștig de capacitate nu înseamnă automat energie suplimentară livrată: aceasta necesită producție disponibilă și respectarea celorlalte constrângeri ale rețelei.
+The line is simplified into three segments in series. Its overall rating is the minimum segment rating at the same hour. Additional capacity does not automatically mean additional energy delivered: available generation and other grid constraints must also be considered.
 
 ```mermaid
 flowchart LR
-    A[Perceive: date meteo și geometrie] --> B[Estimate: model ML local q05/q50/q95]
-    B --> C[Decide: validare, minim pe segmente, praguri]
-    C --> D[Act: decizii JSON și alerte pentru operator]
-    D --> E[Dashboard live, istoric și export CSV]
+    A[Perceive: weather and geometry] --> B[Estimate: local ML q05/q50/q95]
+    B --> C[Decide: validation, segment minimum, thresholds]
+    C --> D[Act: JSON decisions and operator alerts]
+    D --> E[Live dashboard, history and CSV export]
 ```
 
-| Etapă | Implementare | Dovezi |
+| Stage | Implementation | Evidence |
 |---|---|---|
-| Perceive | Date istorice/publice, prognoză, UTC, unități și calitate | [data_pipeline.py](gridpilot-ai/src/data_pipeline.py) |
-| Estimate | HGB antrenat local pe etichete fizice; trei cuantile de ampacitate | [ml_model.py](gridpilot-ai/src/ml_model.py), [physics_engine.py](gridpilot-ai/src/physics_engine.py) |
-| Decide | Validare, segment limitativ, incertitudine și clasificarea riscului | [agent.py](gridpilot-ai/src/agent.py), [decision_engine.py](gridpilot-ai/src/decision_engine.py) |
-| Act | Scriere automată a deciziilor; notificări și coadă de verificare umană | [live_pipeline.py](gridpilot-ai/src/live_pipeline.py), [alert_service.py](gridpilot-ai/src/alert_service.py), [Alerts](gridpilot-ai/pages/alerts.py) |
+| Perceive | Historical/public data, forecasts, UTC, units, and quality checks | [data_pipeline.py](gridpilot-ai/src/data_pipeline.py) |
+| Estimate | Locally trained HGB using physics-generated labels; three ampacity quantiles | [ml_model.py](gridpilot-ai/src/ml_model.py), [physics_engine.py](gridpilot-ai/src/physics_engine.py) |
+| Decide | Validation, limiting segment, uncertainty, and risk classification | [agent.py](gridpilot-ai/src/agent.py), [decision_engine.py](gridpilot-ai/src/decision_engine.py) |
+| Act | Automatic decision export, notifications, and a human-review queue | [live_pipeline.py](gridpilot-ai/src/live_pipeline.py), [alert_service.py](gridpilot-ai/src/alert_service.py), [Alerts](gridpilot-ai/pages/alerts.py) |
 
-Agentul este un flux determinist care folosește predicțiile ML; nu depinde de un LLM sau de un API extern de inferență. Acțiunile autonome sunt publicarea deciziilor, alertarea în aplicație și arhivarea. Aplicarea unei limite în exploatare rămâne responsabilitatea operatorului.
+The agent is a deterministic workflow using ML predictions; it does not depend on an LLM or an external inference API. Its autonomous actions are decision publication, in-app alerting, and archiving. Applying a rating to an operational grid remains the operator's responsibility.
 
-## 2. Instalare reproductibilă
+## 2. Reproducible setup
 
-Mediul verificat: **Python 3.11**, scikit-learn **1.6.1**, NumPy **2.4.6**, pandas **2.2.3**, joblib **1.6.0**, Streamlit **1.67.0**, LineRate **5.0.0**. Modelul implicit este `models/ampacity_model.joblib`; versiunea scikit-learn trebuie să corespundă artefactului.
+Verified environment: **Python 3.11**, scikit-learn **1.6.1**, NumPy **2.4.6**, pandas **2.2.3**, joblib **1.6.0**, Streamlit **1.67.0**, and LineRate **5.0.0**. The default model is `models/ampacity_model.joblib`; the scikit-learn version should match the saved artifact.
 
-În PowerShell, dintr-un director în care doriți să clonați proiectul:
+In PowerShell, from the directory where you want to clone the project:
 
 ```powershell
 git clone https://github.com/Fandrei19/Smarthack.git
@@ -45,218 +45,218 @@ py -3.11 -m venv .venv
 .venv/Scripts/python.exe -m pip install "numpy==2.4.6" "pandas==2.2.3" "scikit-learn==1.6.1" "joblib==1.6.0" "streamlit==1.67.0" "linerate==5.0.0" pytest matplotlib
 ```
 
-`requirements.txt` existent conține doar NumPy și pandas; **nu este suficient pentru aplicația completă**. Comanda de mai sus instalează și dependențele ML, UI, fizică și teste. Pe Linux/macOS folosiți `python3.11 -m venv .venv` și `.venv/bin/python` în locul executabilului Windows.
+The existing `requirements.txt` contains only NumPy and pandas; **it is not sufficient for the complete application**. The command above also installs ML, UI, physics, and testing dependencies. On Linux/macOS, use `python3.11 -m venv .venv` and `.venv/bin/python` instead of the Windows executable.
 
-Toate comenzile următoare se execută din `gridpilot-ai`, cu mediul activat. În PowerShell puteți înlocui `python` cu `.venv/Scripts/python.exe` dacă activarea mediului este restricționată.
+Run all subsequent commands from `gridpilot-ai` with the environment activated. In PowerShell, replace `python` with `.venv/Scripts/python.exe` if environment activation is restricted.
 
 ```powershell
 .venv/Scripts/Activate.ps1
 python -m streamlit run app.py
 ```
 
-Aplicație: **http://localhost:8501**. Prima deschidere descarcă prognoza și rulează modelul și agentul. Este necesară conexiune la internet pentru API și fundalul hărții.
+Application: **http://localhost:8501**. Opening it retrieves a forecast and runs the model and agent. An internet connection is required for the API and map background.
 
-### Demo offline al modelului și agentului
+### Offline model and agent demo
 
 ```bash
 python -B -m src.ml_model predict --weather data/demo/weather_mock.csv --out data/processed/predictions_demo.csv
 python -B -m src.agent --predictions data/processed/predictions_demo.csv --output data/processed/agent_results_demo.json
 ```
 
-Intrarea sintetică are 24 de ore × 3 segmente: **72 de predicții și 24 de decizii ale liniei**. Acest flux CLI rulează fără API după instalare. Dashboardul folosește fișierele live și nu trece automat pe demo; nu prezintă datele sintetice drept prognoză curentă.
+The synthetic input contains 24 hours × 3 segments: **72 predictions and 24 line decisions**. This CLI workflow runs without API access after installation. The dashboard uses live files and does not automatically switch to demo data; synthetic data is not presented as a current forecast.
 
-### Actualizare live unică
+### One-time live refresh
 
 ```bash
 python -B -m src.live_pipeline --once
 ```
 
-Produce `weather_live.csv`, `predictions_live.csv` și `agent_results_live.json` în `data/processed/`. În dashboard, actualizarea are loc la prima deschidere și aproximativ la 15 minute cât există o sesiune activă; butonul **Refresh now** permite actualizare imediată. Nu se lansează un serviciu permanent din dashboard. Comanda CLI fără `--once` este un mod separat, care rulează continuu până este oprit.
+This generates `weather_live.csv`, `predictions_live.csv`, and `agent_results_live.json` in `data/processed/`. The dashboard refreshes on first opening and approximately every 15 minutes while a session is active; **Refresh now** triggers an immediate update. The dashboard does not start a permanent background service. Running the CLI without `--once` is a separate continuous mode that runs until stopped.
 
-## 3. Interfața pentru operator
+## 3. Operator interface
 
-- **Overview:** limita estimată, referința statică, segmentul restrictiv și recomandarea agentului.
-- **Line Monitoring:** selecție de oră, capacitate pe segmente, vreme, intervale q05–q95 și export CSV.
-- **Map:** trei locații ilustrative în Dobrogea; P1–P3 sunt marcaje de amplasament, SEG_1–SEG_3 sunt segmente de conductor. Nicio producție sau injecție SCADA nu este calculată.
-- **Alerts:** motiv, oră, segment, prioritate și confirmarea că operatorul a văzut alerta. Există notificări în aplicație și export CSV.
-- **Weather History:** alegerea fișierului, intervalului de date, segmentelor și variabilei meteo; grafice și descărcarea selecției.
+- **Overview:** estimated rating, static reference, limiting segment, and agent recommendation.
+- **Line Monitoring:** hour selection, per-segment capacity, weather, q05–q95 intervals, and CSV export.
+- **Map:** three illustrative locations in Dobrogea; P1–P3 are site markers, while SEG_1–SEG_3 are conductor segments. No generation or SCADA power injection is calculated.
+- **Alerts:** reason, hour, segment, priority, and acknowledgement. Includes in-app notifications and CSV export.
+- **Weather History:** dataset, date range, segment, and weather-variable selection, with charts and filtered downloads.
 
-Notificările sunt în aplicație, nu email/SMS/push în afara ei. Alertele sunt verificate la un minut cât sesiunea este activă. Confirmarea **Acknowledge** este păstrată în sesiunea browserului; nu rezolvă cauza și nu aprobă limita.
+Notifications are in-app, not email, SMS, or push notifications outside the application. Alerts are checked every minute while the session is active. **Acknowledge** is stored in the browser session; it neither resolves the underlying condition nor approves the rating.
 
-Istoricul separă explicit vremea istorică de prognozele salvate. Fiecare rulare live reușită este arhivată în `data/archive/<UTC run ID>/`, cu vreme, predicții, decizii și momentul preluării. Arhivele sunt locale, ignorate de Git și nu au încă o politică automată de retenție. Prognozele arhivate nu devin observații reale după trecerea timpului.
+History explicitly separates historical weather from saved forecasts. Every successful live run is archived in `data/archive/<UTC run ID>/`, including weather, predictions, decisions, and retrieval time. Archives are local, ignored by Git, and do not yet have an automatic retention policy. Archived forecasts do not become actual observations after their valid time has passed.
 
-## 4. Date, surse și contracte
+## 4. Data, sources, and contracts
 
-| Sursă | Utilizare | Proveniență |
+| Source | Usage | Reference |
 |---|---|---|
-| ERA5 prin Open-Meteo | Vreme istorică 2022–2025 pentru modelul curent | [Historical Weather API](https://open-meteo.com/en/docs/historical-weather-api) |
-| NASA POWER | Export istoric alternativ; exemplu verificat 15–21 iulie 2025 | [Hourly API](https://power.larc.nasa.gov/docs/services/api/temporal/hourly/) |
-| Open-Meteo Forecast | Prognoză pentru următoarele 24 de ore în fluxul live | [Forecast API](https://open-meteo.com/en/docs) |
-| Date sintetice | Demo offline, etichetat în câmpul `source` | [weather_mock.csv](gridpilot-ai/data/demo/weather_mock.csv) |
-| LineRate / CIGRE601 | Etichete fizice calculate pentru antrenare | [Exemplu oficial](https://statnett.github.io/linerate/auto_examples/plot_cigre.html) |
+| ERA5 through Open-Meteo | Historical weather for 2022–2025 used by the current model | [Historical Weather API](https://open-meteo.com/en/docs/historical-weather-api) |
+| NASA POWER | Alternative historical export; example verified for July 15–21, 2025 | [Hourly API](https://power.larc.nasa.gov/docs/services/api/temporal/hourly/) |
+| Open-Meteo Forecast | Next 24 hours in the live workflow | [Forecast API](https://open-meteo.com/en/docs) |
+| Synthetic data | Offline demo, identified in the `source` field | [weather_mock.csv](gridpilot-ai/data/demo/weather_mock.csv) |
+| LineRate / CIGRE601 | Physics-generated training labels | [Official example](https://statnett.github.io/linerate/auto_examples/plot_cigre.html) |
 
-Datele meteo sunt estimări meteorologice grilate și prognoze, nu senzori pe conductor. NASA utilizează `T2M`, `WS10M`, `WD10M`, `ALLSKY_SFC_SW_DWN`. Open-Meteo include și umiditate în procesarea internă. Exportul agreat păstrează exact opt coloane:
+Weather data consists of gridded estimates and forecasts, not conductor-mounted sensor measurements. NASA parameters are `T2M`, `WS10M`, `WD10M`, and `ALLSKY_SFC_SW_DWN`. Open-Meteo also includes humidity in internal processing. The agreed export contains exactly eight columns:
 
 ```text
 timestamp_utc,segment_id,air_temp_c,wind_speed_ms,wind_direction_deg,solar_radiation,source,data_quality
 ```
 
-Temperatură în °C, vânt în m/s, direcție de proveniență în grade, radiație în W/m², timp UTC. Parserul verifică unitățile NASA și valorile de umplere. Perechea timp–segment identifică o înregistrare. Valorile lipsă sunt marcate; nu introducem diferențe artificiale între locații dacă sursa livrează aceeași celulă meteo.
+Temperature is in °C, wind speed in m/s, wind-from direction in degrees, radiation in W/m², and timestamps in UTC. The parser checks NASA units and fill values. Timestamp–segment pairs identify records. Missing values are flagged; artificial weather differences are not introduced when locations share the same source grid cell.
 
-Componenta perpendiculară a vântului este derivată ca `viteza × abs(sin(direcție − azimut))`, cu unghiul convertit în radiani. Caracteristicile suplimentare sunt calculate intern și nu adaugă coloane contractului de opt câmpuri.
+Crosswind speed is derived as `speed × abs(sin(direction − azimuth))`, with the angle converted to radians. Additional features are computed internally without changing the eight-column export contract.
 
-| Segment | Latitudine | Longitudine | Azimut |
+| Segment | Latitude | Longitude | Azimuth |
 |---|---:|---:|---:|
 | SEG_1 | 44.38 | 28.14 | 72° |
 | SEG_2 | 44.46 | 28.48 | 71° |
 | SEG_3 | 44.55 | 28.81 | 69° |
 
-Configurație: [line_segments.json](gridpilot-ai/config/line_segments.json). Geometria, conductorul și referința statică sunt ipoteze de simulare, nu active PPC verificate. Condițiile de utilizare și atribuirea furnizorilor trebuie păstrate când datele sunt redistribuite; accesul public nu implică lipsa condițiilor de licențiere.
+Configuration: [line_segments.json](gridpilot-ai/config/line_segments.json). Geometry, conductor parameters, and the static reference are simulation assumptions, not verified PPC assets. Provider attribution and usage conditions must be respected when redistributing data; public access does not imply unrestricted licensing.
 
 ```bash
-# Istoric ERA5: export implicit 2022–2025; poate necesita timp și acces API.
+# Historical ERA5: default 2022–2025 export; requires time and API access.
 python -m src.data_pipeline
-# Export NASA alternativ, fără endpoint istoric plătit.
+# Alternative NASA export without a paid historical endpoint.
 python -m src.data_pipeline --historical-source nasa --start 2025-07-15 --end 2025-07-21 --weather-output data/processed/weather_nasa_week.csv
-# Prognoză separată, 24 h.
+# Separate 24-hour forecast export.
 python -m src.data_pipeline --forecast-hours 24 --weather-output data/processed/weather_forecast.csv
 ```
 
-## 5. Model ML propriu și evaluare
+## 5. Team-trained ML model and evaluation
 
-**Ce învață:** aproximarea capacității termice calculate de `linerate.Cigre601` pentru vreme și geometrie date. Nu este un model care prognozează direct vremea și nu este antrenat pe avarii sau curenți măsurați.
+**Learning objective:** approximate the thermal capacity calculated by `linerate.Cigre601` for given weather and geometry. The model does not directly forecast weather and is not trained on failures or measured currents.
 
-- Model: `HistGradientBoostingRegressor`, predicții q05/q50/q95 și calibrarea limitei inferioare pe validare.
-- Caracteristici: temperatură, vânt, componente perpendiculară/paralelă, radiație, orientare și caracteristici temporale/solare.
-- Baseline-uri: mediană constantă și regresie liniară; raportul include și HGB punctual.
-- Artefact implicit: [ampacity_model.joblib](gridpilot-ai/models/ampacity_model.joblib), inferență locală.
-- Fizică: conductor de exemplu CIGRE TB 601, temperatură maximă presupusă 75 °C; [parametri și ipoteze](gridpilot-ai/config/conductor_config.json).
+- Model: `HistGradientBoostingRegressor`, q05/q50/q95 predictions, with lower-bound calibration on validation data.
+- Features: temperature, wind, perpendicular/parallel components, radiation, orientation, and temporal/solar features.
+- Baselines: constant median and linear regression; the report also includes point-estimate HGB.
+- Default artifact: [ampacity_model.joblib](gridpilot-ai/models/ampacity_model.joblib), used for local inference.
+- Physics: CIGRE TB 601 example conductor, with an assumed maximum temperature of 75 °C; [parameters and assumptions](gridpilot-ai/config/conductor_config.json).
 
-### Separarea datelor modelului livrat
+### Data split for the shipped model
 
-Metadatele artefactului și raportul din **7 noiembrie 2026, 18:57 UTC** indică o împărțire cronologică aproximativ **50/25/25**, cu 24 h de separare. Nu folosim o împărțire aleatoare a rândurilor între aceleași ore/segmente.
+Artifact metadata and the report dated **November 7, 2026, 18:57 UTC** specify an approximately **50/25/25 chronological split**, with a 24-hour gap. Rows sharing timestamps across segments are not randomly distributed between splits.
 
-| Set | Rânduri | Perioadă UTC |
+| Split | Rows | UTC period |
 |---|---:|---|
-| Antrenare | 52.596 | 2022-01-01 00:00 → 2024-01-01 11:00 |
-| Validare | 26.226 | 2024-01-02 12:00 → 2024-12-31 17:00 |
-| Test separat | 26.226 | 2025-01-01 18:00 → 2025-12-31 23:00 |
+| Training | 52,596 | 2022-01-01 00:00 → 2024-01-01 11:00 |
+| Validation | 26,226 | 2024-01-02 12:00 → 2024-12-31 17:00 |
+| Held-out test | 26,226 | 2025-01-01 18:00 → 2025-12-31 23:00 |
 
-### Rezultate raportate pe test
+### Reported test results
 
 | Model | MAE (A) | RMSE (A) |
 |---|---:|---:|
-| Mediană constantă | 156.3 | 193.2 |
-| Regresie liniară | 42.24 | 59.50 |
-| HGB calibrat, livrat | **4.831** | **7.269** |
+| Constant median | 156.3 | 193.2 |
+| Linear regression | 42.24 | 59.50 |
+| Shipped calibrated HGB | **4.831** | **7.269** |
 
-MAE/RMSE caracterizează predicția centrală; evaluarea q05 se raportează separat. Pentru modelul livrat, q05 este sub sau egal cu referința fizică în **97.06%** dintre exemple; există **772 supraestimări (2.944%)**, cu maximum **52.06 A**. Aceste rezultate nu reprezintă o garanție de siguranță pe rețeaua reală.
+MAE/RMSE describe the central prediction; q05 is evaluated separately. For the shipped model, q05 is at or below the physics reference in **97.06%** of examples. There are **772 overestimations (2.944%)**, with a maximum of **52.06 A**. These results are not a real-grid safety guarantee.
 
-**Error analysis:** la vânt sub 1 m/s, MAE este 8.918 A. La temperatură ≥30 °C și vânt sub 1 m/s, MAE este **16.96 A**, iar acoperirea q05 scade la **85.71%**, pe numai **35 de exemple**. Raportul include analize pe zi/noapte, radiație, vânt transversal, bootstrap pe zile și patru ferestre de backtest.
+**Error analysis:** for wind below 1 m/s, MAE is 8.918 A. At temperatures ≥30 °C with wind below 1 m/s, MAE reaches **16.96 A** and q05 coverage drops to **85.71%**, based on only **35 examples**. The report includes day/night, radiation, and crosswind slices, day-block bootstrap intervals, and four backtest folds.
 
-Dovezi: [evaluation_report.md](gridpilot-ai/models/evaluation_report.md) și [evaluation_report.json](gridpilot-ai/models/evaluation_report.json). Unele note de dezvoltare din `MODEL_CARD.md`/`README_model.md` descriu stări anterioare; pentru artefactul livrat folosim metadatele modelului și raportul datat de mai sus.
+Evidence: [evaluation_report.md](gridpilot-ai/models/evaluation_report.md) and [evaluation_report.json](gridpilot-ai/models/evaluation_report.json). Some development notes in `MODEL_CARD.md`/`README_model.md` describe earlier project states; the shipped artifact is documented by its metadata and the dated report above.
 
-**Limita incertitudinii:** cuantilele descriu aproximarea unei referințe fizice sintetice. Nu acoperă eroarea prognozei meteo, îmbătrânirea conductorului, săgeata, erorile geometriei sau toate incertitudinile din exploatare.
+**Uncertainty limitation:** the quantiles describe approximation error against a synthetic physics reference. They do not cover weather-forecast error, conductor ageing, sag, geometry errors, or all operational uncertainties.
 
-### Reantrenare fără suprascrierea modelului livrat
+### Retraining without overwriting the shipped model
 
 ```bash
 python -m src.ml_model train --weather data/processed/weather.csv --segments config/line_segments.json --model-out models/retrained/ampacity_model.joblib --dataset-out data/processed/retrained_ampacity.csv --report-dir models/retrained
 ```
 
-Codul de antrenare este în repository. Reantrenarea cu valorile implicite din cod poate diferi de configurația ponderată/calibrată a artefactului livrat. Configurația exactă a acestuia este în `metadata.train_config`; nu promitem reproducerea identică a cifrelor printr-o comandă cu alte opțiuni implicite.
+Training code is included in the repository. Retraining with code defaults may differ from the weighted/calibrated configuration used for the shipped artifact. Its exact configuration is stored in `metadata.train_config`; identical metrics are not promised when using different default settings.
 
-## 6. Agentul: praguri și constrângeri
+## 6. Agent thresholds and constraints
 
-Pentru o oră completă: `I_line = min(q05_SEG_1, q05_SEG_2, q05_SEG_3)`.
-Raportul `R = I_static / I_line` compară două limite, nu reprezintă o măsurătoare SCADA a încărcării.
+For a complete hour: `I_line = min(q05_SEG_1, q05_SEG_2, q05_SEG_3)`.
+The ratio `R = I_static / I_line` compares two ratings; it is not a SCADA measurement of actual utilization.
 
-| Situație | Acțiune |
+| Condition | Action |
 |---|---|
-| Date invalide/incomplete sau incertitudine invalidă | `FALLBACK_STATIC`, verificare umană |
-| Incertitudine `(q95−q05)/q50 > 0.10` | `FALLBACK_STATIC`, verificare umană |
-| Incertitudine `> 0.05` și `≤ 0.10` | `KEEP_STATIC` |
-| Cu verificările trecute, `R ≤ 0.80` | `RECOMMEND_DYNAMIC_RATING` |
-| Cu verificările trecute, `0.80 < R ≤ 0.95` | `KEEP_STATIC` |
-| Cu verificările trecute, `R > 0.95` | `OPERATOR_REVIEW` |
+| Invalid/incomplete data or invalid uncertainty | `FALLBACK_STATIC`, human review |
+| Uncertainty `(q95−q05)/q50 > 0.10` | `FALLBACK_STATIC`, human review |
+| Uncertainty `> 0.05` and `≤ 0.10` | `KEEP_STATIC` |
+| After passing preceding checks, `R ≤ 0.80` | `RECOMMEND_DYNAMIC_RATING` |
+| After passing preceding checks, `0.80 < R ≤ 0.95` | `KEEP_STATIC` |
+| After passing preceding checks, `R > 0.95` | `OPERATOR_REVIEW` |
 
-Pragurile sunt **euristici de prototip**, nu praguri aprobate de PPC sau impuse de standarde. Marja mai mare permite recomandarea; marja mică sau incertitudinea mare limitează automatizarea. Codul are și verificări pentru sarcină planificată atunci când aceasta este furnizată; demo-ul nu pretinde telemetrie reală.
+Thresholds are **prototype heuristics**, not PPC-approved or standards-mandated limits. A larger margin supports a recommendation; a small margin or high uncertainty restricts automation. The code also checks planned load when supplied; the demo does not claim real telemetry.
 
-JSON-ul include `timestamp_utc`, `line_rating_q05_a`, `bottleneck_segment`, `risk_level`, `action`, `requires_human_review`, `reason`. Explicația este trasabilă: **intrări → predicții → segment restrictiv → prag → acțiune**. Nu pretindem explicații SHAP implementate.
+Decision JSON includes `timestamp_utc`, `line_rating_q05_a`, `bottleneck_segment`, `risk_level`, `action`, `requires_human_review`, and `reason`. The explanation is traceable: **inputs → predictions → limiting segment → threshold → action**. SHAP explanations are not implemented.
 
-`FALLBACK_STATIC` este o recomandare a prototipului, nu dovada că limita statică este sigură în orice condiții extreme. Un operator trebuie să valideze limita de rezervă și celelalte constrângeri ale rețelei.
+`FALLBACK_STATIC` is a prototype recommendation, not evidence that the static rating is safe under every extreme condition. An operator must validate the fallback limit and other grid constraints.
 
-## 7. Robustness, responsabilitate și securitate
+## 7. Robustness, responsibility, and security
 
-- Parsare API, validarea unităților/timpului, tratarea erorilor HTTP și timeouturilor.
-- Verificarea valorilor lipsă, nenumerice, nefinite, duplicatelor și ordinii cuantilelor.
-- Verificarea prezenței tuturor celor trei segmente înaintea deciziei.
-- Fișierele live se înlocuiesc după generarea reușită a întregului flux; la eșec se păstrează rezultatul precedent și se afișează avertizare. Publicarea celor trei fișiere nu este o tranzacție de bază de date.
-- Interfața semnalează preluări mai vechi de 30 de minute și exclude orele expirate din monitorizarea curentă.
-- Alertele disting risc HIGH de incertitudine sau probleme de date; acestea din urmă nu sunt avarii confirmate.
-- Date publice/sintetice, fără date personale de clienți și fără acreditări SCADA. Nu încărcați secrete în Git.
-- Modelul joblib trebuie încărcat numai dintr-o sursă de încredere. Dashboardul nu include autentificare sau audit multiutilizator și este destinat demonstrației locale.
+- API parsing, unit/time validation, and handling of HTTP errors and timeouts.
+- Checks for missing, nonnumeric, and nonfinite values, duplicates, and quantile ordering.
+- Verification that all three expected segments are present before making a line decision.
+- Live files are replaced after the complete workflow succeeds. On failure, the previous result is retained and a warning is displayed. Publishing the three files is not a database transaction.
+- The UI flags downloads older than 30 minutes and excludes expired hours from current monitoring.
+- Alerts distinguish HIGH risk from uncertainty or data issues; the latter are not confirmed electrical faults.
+- Public/synthetic data, without customer personal data or SCADA credentials. Do not commit secrets to Git.
+- Load joblib models only from trusted sources. The dashboard has no authentication or multi-user audit trail and is intended for local demonstration.
 
-## 8. Impact economic și sustenabilitate
+## 8. Economic impact and sustainability
 
-Modulul [investment_calculator.py](gridpilot-ai/src/investment_calculator.py) estimează valoarea unui scenariu de capacitate suplimentară. Presupune intervale orare și preț constant, fără producție reală sau calcul complet de rețea: rezultatul este **potențial ilustrativ, nu venit realizat sau profit validat**. Nu este prezentat într-o pagină Reports, eliminată din navigația curentă.
+[investment_calculator.py](gridpilot-ai/src/investment_calculator.py) estimates the value of an additional-capacity scenario. It assumes hourly intervals and a constant price, without actual generation or a complete network calculation. Its output is **illustrative potential, not realized revenue or validated profit**. It is not shown on a Reports page, which was removed from the current navigation.
 
-Conversie ilustrativă trifazată: `P_MW = sqrt(3) × U_kV × I_A × cos(phi) / 1000`.
-Pentru un calcul operațional ar trebui comparată puterea efectiv livrabilă în scenariul static/dinamic, limitată de producție și rețea; energia este suma diferențelor MW × durata în ore. Venitul brut folosește prețul fiecărui interval, iar beneficiul net scade costurile relevante.
+Illustrative three-phase conversion: `P_MW = sqrt(3) × U_kV × I_A × cos(phi) / 1000`.
+An operational calculation would compare deliverable power under static and dynamic scenarios, constrained by generation and the network. Energy is the sum of power differences in MW multiplied by interval duration in hours. Gross revenue uses each interval's price; net benefit subtracts relevant costs.
 
-Beneficiul de mediu potențial este reducerea limitării producției regenerabile și utilizarea mai eficientă a infrastructurii existente. Nu raportăm emisii CO₂ evitate sau MWh salvați măsurați fără datele necesare.
+Potential environmental benefits include reduced renewable curtailment and better use of existing infrastructure. We do not claim measured avoided CO₂ emissions or saved MWh without the required supporting data.
 
-## 9. Teste și dovezi pentru jurizare
+## 9. Tests and judging evidence
 
 ```bash
 python -B -m pytest -q
 ```
 
-Ultima rulare completă verificată înaintea acestei actualizări de documentație: **96 passed**, Python 3.11, cu LineRate instalat. Acoperă date, model, fizică, validare, agent, istoric și alerte. Au fost verificate separat paginile Streamlit, confirmarea alertelor și fluxul live de 72 de predicții / 24 de decizii. Numărul de teste poate evolua.
+Last full verified run before this documentation update: **96 passed**, using Python 3.11 with LineRate installed. Coverage includes data, model, physics, validation, agent, history, and alerts. Streamlit pages, alert acknowledgement, and the live workflow producing 72 predictions / 24 decisions were also checked separately. The test count may evolve.
 
-| Criteriu hackathon | Dovadă în proiect |
+| Hackathon criterion | Project evidence |
 |---|---|
-| Idea & Relevance · 25p | Problemă de capacitate termică și integrare regenerabile; secțiunile 1 și 8 |
-| ML Quality · 25p | Antrenare locală, baseline-uri, test cronologic, metrici și error analysis; secțiunea 5 |
-| The Agent · 25p | Flux automat date → ML → decizie → JSON/alerte; secțiunile 1 și 6 |
-| Robustness · 10p | Date lipsă, timeouturi, stale data, fallback și teste; secțiunea 7 |
-| Explainability · 10p | Predicții pe segmente, praguri, motiv și verificare umană |
-| Demo & Repository · 5p | Comenzi de instalare/demo, artefact ML, teste și surse |
+| Idea & Relevance · 25 points | Thermal capacity and renewable integration problem; sections 1 and 8 |
+| ML Quality · 25 points | Local training, baselines, chronological test, metrics, and error analysis; section 5 |
+| The Agent · 25 points | Automated data → ML → decision → JSON/alerts workflow; sections 1 and 6 |
+| Robustness · 10 points | Missing data, timeouts, stale data, fallback, and tests; section 7 |
+| Explainability · 10 points | Per-segment predictions, thresholds, reasons, and human review |
+| Demo & Repository · 5 points | Setup/demo commands, ML artifact, tests, and sources |
 
-**Cerințe eliminatorii:** model antrenat de echipă cu cod și artefact local; test separat și baseline; inferență fără API extern de ML; acțiuni automate dincolo de chat; date publice/sintetice cu surse. Tabelul documentează dovezi, nu garantează punctajul juriului.
+**Mandatory requirements:** team-trained model with code and local artifact; separate test set and baseline; inference without an external ML API; automated actions beyond chat; public/synthetic data with sources. This table documents evidence, not a guaranteed jury score.
 
-### Demo de 5 minute
+### Five-minute demo
 
-1. **0:00–0:40:** problema și scenariul simulat din Dobrogea.
-2. **0:40–1:30:** Overview și comparația static/dinamic; precizați că A este capacitate, nu curent măsurat.
-3. **1:30–2:20:** schimbați ora, arătați segmentul restrictiv și vremea în Line Monitoring.
-4. **2:20–3:10:** Alerts: motiv, verificare umană și confirmarea unei alerte; nu forțați apariția unei alerte reale dacă prognoza nu o produce.
-5. **3:10–4:10:** raport ML, baseline, test separat și cazul dificil vânt slab + căldură.
-6. **4:10–5:00:** Weather History, surse, limita simulării și impactul potențial.
+1. **0:00–0:40:** introduce the problem and simulated Dobrogea scenario.
+2. **0:40–1:30:** show Overview and the static/dynamic comparison; explain that A denotes capacity, not measured current.
+3. **1:30–2:20:** change the hour and show the limiting segment and weather in Line Monitoring.
+4. **2:20–3:10:** show Alerts: reason, human review, and acknowledgement. Do not fabricate a live alert if the forecast does not produce one.
+5. **3:10–4:10:** show the ML report, baselines, separate test set, and difficult low-wind/high-temperature conditions.
+6. **4:10–5:00:** show Weather History, sources, simulation limitations, and potential impact.
 
-Pentru Q&A: explicați de unde vin etichetele, de ce folosim minimul segmentelor, limitele q05, pragurile, diferența dintre prognoză și măsurătoare și de ce capacitatea suplimentară nu este automat profit.
+For Q&A, explain label provenance, why the minimum segment rating is used, q05 limitations, thresholds, forecast versus measurement, and why additional capacity is not automatically profit.
 
-## 10. Echipa și structura
+## 10. Team and repository structure
 
-| Rol | Responsabilitate |
+| Role | Responsibility |
 |---|---|
-| 1 · Data Engineer | API-uri, configurație, curățare, UTC/unități, contract CSV și mock |
-| 2 · ML Engineer | Referință fizică, antrenare, baseline, calibrare și evaluare |
-| 3 · Agent Developer | Validare, monitorizarea segmentelor, risc și decizii |
-| 4 · Frontend & Integration | Dashboard, vizualizări, alerte, integrare și demo |
+| 1 · Data Engineer | APIs, configuration, cleaning, UTC/units, CSV contract, and mock data |
+| 2 · ML Engineer | Physics reference, training, baselines, calibration, and evaluation |
+| 3 · Agent Developer | Validation, segment monitoring, risk, and decisions |
+| 4 · Frontend & Integration | Dashboard, visualizations, alerts, integration, and demo |
 
 ```text
 gridpilot-ai/
-  app.py                    Navigație și actualizare pe durata sesiunii
-  config/                   Segmente și ipoteze conductor
-  data/demo/                Intrări sintetice versionate
-  data/raw/                 Răspunsuri API păstrate
-  data/processed/           Istoric, predicții și decizii
-  data/archive/             Arhive live locale, ignorate de Git
-  models/                   Modelul local și rapoarte de evaluare
-  pages/                    Overview, monitorizare, hartă, alerte, istoric
-  src/                      Pipeline, fizică, ML, agent și servicii UI
-  tests/                    Teste automate
+  app.py                    Navigation and session-based refresh
+  config/                   Segment and conductor assumptions
+  data/demo/                Versioned synthetic inputs
+  data/raw/                 Retained API responses
+  data/processed/           History, predictions, and decisions
+  data/archive/             Local live archives, ignored by Git
+  models/                   Local model and evaluation reports
+  pages/                    Overview, monitoring, map, alerts, history
+  src/                      Pipeline, physics, ML, agent, and UI services
+  tests/                    Automated tests
 ```
 
-**Următorul pas pentru un pilot:** măsurători reale, validarea parametrilor/limitării termice, incertitudine meteo, constrângeri de tensiune/stabilitate și echipamente, fluxuri de putere și integrare controlată cu operatorul. Acestea nu sunt implementate ca funcții de producție în demo.
+**Next steps toward a pilot:** real measurements, parameter and thermal-rating validation, weather uncertainty, voltage/stability and equipment constraints, power flows, and controlled integration with the operator. These are not implemented as production capabilities in this demo.
