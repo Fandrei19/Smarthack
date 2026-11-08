@@ -42,10 +42,10 @@ git clone https://github.com/Fandrei19/Smarthack.git
 cd Smarthack/gridpilot-ai
 py -3.11 -m venv .venv
 .venv/Scripts/python.exe -m pip install --upgrade pip
-.venv/Scripts/python.exe -m pip install -r requirements.txt
+.venv/Scripts/python.exe -m pip install "numpy==2.4.6" "pandas==2.2.3" "scikit-learn==1.6.1" "joblib==1.6.0" "streamlit==1.67.0" "linerate==5.0.0" pytest matplotlib
 ```
 
-`requirements.txt` includes the complete set of direct dependencies for weather processing, ML, physics, the dashboard, investment plots, and tests. Versions are pinned to the verified Python 3.11 environment; transitive dependencies are resolved by pip. A forwarding `requirements.txt` at the repository root supports installation from either directory. On Linux/macOS, use `python3.11 -m venv .venv` and `.venv/bin/python` instead of the Windows executable.
+The existing `requirements.txt` contains only NumPy and pandas; **it is not sufficient for the complete application**. The command above also installs ML, UI, physics, and testing dependencies. On Linux/macOS, use `python3.11 -m venv .venv` and `.venv/bin/python` instead of the Windows executable.
 
 Run all subsequent commands from `gridpilot-ai` with the environment activated. In PowerShell, replace `python` with `.venv/Scripts/python.exe` if environment activation is restricted.
 
@@ -146,8 +146,6 @@ Artifact metadata and the report dated **November 7, 2026, 18:57 UTC** specify a
 
 | Model | MAE (A) | RMSE (A) |
 |---|---:|---:|
-| Constant median | 156.3 | 193.2 |
-| Linear regression | 42.24 | 59.50 |
 | Shipped calibrated HGB | **4.831** | **7.269** |
 
 MAE/RMSE describe the central prediction; q05 is evaluated separately. For the shipped model, q05 is at or below the physics reference in **97.06%** of examples. There are **772 overestimations (2.944%)**, with a maximum of **52.06 A**. These results are not a real-grid safety guarantee.
@@ -206,37 +204,7 @@ An operational calculation would compare deliverable power under static and dyna
 
 Potential environmental benefits include reduced renewable curtailment and better use of existing infrastructure. We do not claim measured avoided CO₂ emissions or saved MWh without the required supporting data.
 
-## 9. Tests and judging evidence
-
-```bash
-python -B -m pytest -q
-```
-
-Last full verified run before this documentation update: **96 passed**, using Python 3.11 with LineRate installed. Coverage includes data, model, physics, validation, agent, history, and alerts. Streamlit pages, alert acknowledgement, and the live workflow producing 72 predictions / 24 decisions were also checked separately. The test count may evolve.
-
-| Hackathon criterion | Project evidence |
-|---|---|
-| Idea & Relevance · 25 points | Thermal capacity and renewable integration problem; sections 1 and 8 |
-| ML Quality · 25 points | Local training, baselines, chronological test, metrics, and error analysis; section 5 |
-| The Agent · 25 points | Automated data → ML → decision → JSON/alerts workflow; sections 1 and 6 |
-| Robustness · 10 points | Missing data, timeouts, stale data, fallback, and tests; section 7 |
-| Explainability · 10 points | Per-segment predictions, thresholds, reasons, and human review |
-| Demo & Repository · 5 points | Setup/demo commands, ML artifact, tests, and sources |
-
-**Mandatory requirements:** team-trained model with code and local artifact; separate test set and baseline; inference without an external ML API; automated actions beyond chat; public/synthetic data with sources. This table documents evidence, not a guaranteed jury score.
-
-### Five-minute demo
-
-1. **0:00–0:40:** introduce the problem and simulated Dobrogea scenario.
-2. **0:40–1:30:** show Overview and the static/dynamic comparison; explain that A denotes capacity, not measured current.
-3. **1:30–2:20:** change the hour and show the limiting segment and weather in Line Monitoring.
-4. **2:20–3:10:** show Alerts: reason, human review, and acknowledgement. Do not fabricate a live alert if the forecast does not produce one.
-5. **3:10–4:10:** show the ML report, baselines, separate test set, and difficult low-wind/high-temperature conditions.
-6. **4:10–5:00:** show Weather History, sources, simulation limitations, and potential impact.
-
-For Q&A, explain label provenance, why the minimum segment rating is used, q05 limitations, thresholds, forecast versus measurement, and why additional capacity is not automatically profit.
-
-## 10. Team and repository structure
+## 9. Team and repository structure
 
 | Role | Responsibility |
 |---|---|
