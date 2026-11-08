@@ -105,7 +105,9 @@ trend = base.mark_line(color="#bbb").encode(y=alt.Y("line_rating:Q", title="Ampa
 
 dots = base.mark_point(filled=True, size=70).encode(
     y="line_rating:Q",
-    color=alt.Color("limiting_segment:N", title="Limiting segment"),
+    color=alt.Color("limiting_segment:N", title="Limiting segment",
+                    scale=alt.Scale(domain=["SEG_1", "SEG_2", "SEG_3"],
+                                    range=["#0072B2", "#E69F00", "#CC79A7"])),
     tooltip=["timestamp:T", alt.Tooltip("line_rating:Q", format=".0f"),
              "limiting_segment:N"])
 
@@ -157,7 +159,9 @@ with st.expander("Uncertainty range by segment"):
                "(uncertainty = (q95 − q05) / q50).")
 
     b = alt.Chart(window).encode(x=alt.X("timestamp:T", title="Timestamp (UTC)"),
-                                 color=alt.Color("segment_id:N", title="Segment"))
+                                 color=alt.Color("segment_id:N", title="Segment",
+                                     scale=alt.Scale(domain=["SEG_1", "SEG_2", "SEG_3"],
+                                                     range=["#0072B2", "#E69F00", "#CC79A7"])))
 
     band = b.mark_area(opacity=0.15).encode(
         y=alt.Y("q05:Q", title="Ampacity (A)", scale=alt.Scale(zero=False)), y2="q95:Q")

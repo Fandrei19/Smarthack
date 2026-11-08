@@ -6,7 +6,9 @@ from src.dashboard_service import get_dashboard_data
 from src.data_processor import decision_for_hour
 
 st.set_page_config(layout="wide")
-st.title("Power Grid Map - Romania")
+st.title("Dobrogea · simulated generation sites")
+st.caption("P1–P3 are illustrative generation sites at the existing weather coordinates. "
+           "SEG_1–SEG_3 remain conductor sections. Plant injections and power flows are not simulated yet.")
 
 # data loading and validation
 try:
@@ -92,6 +94,13 @@ for s_id, geom in SEGMENT_GEOMETRY.items():
     })
 
 df = pd.DataFrame(rows)
+plants = pd.DataFrame([
+    {"center": SEGMENT_GEOMETRY[seg]["center"], "code": f"P{i}",
+     "label": f"Plant P{i}", "color": color,
+     "tooltip_text": f"P{i}: illustrative generation site\nWeather reference: {seg}\nNo measured generation or SCADA connection"}
+    for i, (seg, color) in enumerate(zip(SEGMENT_GEOMETRY,
+        [[0, 114, 178], [230, 159, 0], [204, 121, 167]]), start=1)
+])
 
 # headline alerts and weakest segment identification
 known = df.dropna(subset=["pct"])
@@ -113,7 +122,8 @@ if nodata and not known.empty:
     st.warning(f"No prediction for {', '.join(nodata)} at this hour, so line capacity cannot be computed.")
 
 # UI layout: pydeck map and side cards
-left, right = st.columns([3, 1])
+left = st.container()
+right = st.container()
 
 with left:
     # layer 1: power line transmission paths
@@ -128,38 +138,48 @@ with left:
         auto_highlight=True,
     )
 
-    # layer 2: station / measurement center points
+    # Fixed-size outlined site markers remain readable at any zoom.
     point_layer = pdk.Layer(
-        "ScatterplotLayer",
-        df,
-        get_position="center",
-        get_color="color",
-        get_radius=3000,
-        radius_min_pixels=8,
+        "ScatterplotLayer", plants, get_position="center",
+        get_fill_color="color", get_line_color=[255, 255, 255],
+        stroked=True, line_width_min_pixels=3,
+        get_radius=180, radius_scale=1, radius_min_pixels=12, radius_max_pixels=16,
         pickable=True,
     )
-
-    # set initial camera view centered over Eastern Romania (Dobrogea focus)
-    # adjust zoom level to ~6.5 if displaying all of Romania at once
+    code_layer = pdk.Layer(
+        "TextLayer", plants, get_position="center", get_text="code",
+        get_color=[255, 255, 255], get_size=14, size_scale=1, size_min_pixels=14, size_max_pixels=14, get_alignment_baseline="'center'",
+        get_text_anchor="'middle'", font_weight=700,
+    )
+    label_layer = pdk.Layer(
+        "TextLayer", plants, get_position="center", get_text="label",
+        get_color=[20, 40, 60], get_size=15, size_scale=1, size_min_pixels=15, size_max_pixels=15, get_pixel_offset=[0, -36],
+        get_text_anchor="'middle'", get_alignment_baseline="'bottom'",
+        background=True, get_background_color=[255, 255, 255, 235],
+        background_padding=[7, 5], font_weight=600,
+    )
     view_state = pdk.ViewState(
-        latitude=44.60,
-        longitude=28.40,
-        zoom=8.5,
-        pitch=0
+        latitude=44.465, longitude=28.475, zoom=8.5, pitch=0
     )
 
     r_deck = pdk.Deck(
-        layers=[path_layer, point_layer],
+        layers=[path_layer, point_layer, code_layer, label_layer],
         initial_view_state=view_state,
         map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
         tooltip={"text": "{tooltip_text}"}
     )
 
-    st.pydeck_chart(r_deck)
-    st.caption("🟢 plenty of room · 🟡 limited · 🔴 almost none · ⚪ no data. Hover over segments for details.")
+    st.pydeck_chart(r_deck, height=570)
+    st.caption("P1 / P2 / P3 = illustrative plants; colored paths = conductor segments. "
+               "🟢 plenty of room · 🟡 limited · 🔴 almost none · ⚪ no data. Hover over segments for details.")
 
 with right:
-    st.subheader("Segments")
+    st.subheader("Simulated sites")
+    for plant in plants.to_dict("records"):
+        st.markdown(f"**{plant['code']} · Simulated plant**")
+        st.caption(f"{plant['center'][1]:.3f}° N, {plant['center'][0]:.3f}° E · illustrative location")
+    st.divider()
+    st.subheader("Conductor segments")
     for r in rows:
         with st.container(border=True):
             st.markdown(f"**{r['emoji']} {r['name']}**" + (" · weakest" if r["name"] == weakest else ""))

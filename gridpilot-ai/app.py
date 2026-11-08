@@ -6,6 +6,7 @@ from time import monotonic
 import streamlit as st
 
 from src.live_pipeline import refresh_live_data
+from src.alert_service import load_alerts
 
 
 st.set_page_config(
@@ -52,6 +53,23 @@ def live_status():
         if was_rendered and previous != updated:
             st.rerun()
 
+@st.fragment(run_every="1min")
+def alert_notifications():
+    alerts = load_alerts()
+    acknowledged = st.session_state.setdefault("acknowledged_alerts", set())
+    pending = [item for item in alerts if item["id"] not in acknowledged]
+    ids = {item["id"] for item in alerts}
+    previous = st.session_state.get("notified_alert_ids", set())
+    new = ids - previous - acknowledged
+    if new:
+        st.toast(f"{len(new)} new alerts need human review. Open Alerts.", icon="⚠️")
+    st.session_state["notified_alert_ids"] = ids
+    if pending:
+        st.warning(f"{len(pending)} alerts awaiting human review")
+    else:
+        st.caption("No unacknowledged alerts")
+    st.page_link("pages/alerts.py", label="Open operator alerts", icon=":material/notifications:")
+
 # pages
 overview = st.Page(
     "pages/overview.py",
@@ -77,18 +95,6 @@ alerts = st.Page(
     icon = ":material/notifications:"
 )
 
-reports = st.Page(
-    "pages/reports.py",
-    title = "Reports",
-    icon = ":material/description:"
-)
-
-settings = st.Page(
-    "pages/settings.py",
-    title = "Settings",
-    icon = ":material/settings:"
-)
-
 history = st.Page("pages/history.py", title="Weather History", icon=":material/history:")
 
 # sidebar
@@ -104,13 +110,15 @@ with st.sidebar:
 pages = {
     "MONITORING": [overview, monitoring, maps],
     "ACTIONS": [alerts],
-    "ANALYTICS": [history, reports],
-    "CONFIGURATION": [settings]
+    "ANALYTICS": [history]
 }
 
 pg = st.navigation(
     pages,
     # position = "top"
 )
+
+with st.sidebar:
+    alert_notifications()
 
 pg.run()
